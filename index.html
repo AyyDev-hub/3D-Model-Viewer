@@ -227,6 +227,15 @@ select{
         </div>
         <input type="file" id="fileInput" accept=".glb,.gltf,.obj,.stl" style="display:none;">
         <div class="formats-line">Supported: GLB, GLTF, OBJ, STL</div>
+
+        <div class="divider"></div>
+        <div class="lbl" style="color:var(--text-dim);font-size:11.5px;margin-bottom:6px;">Godot project (.tscn)</div>
+        <button class="btn mini" id="btnGodotFolder" style="margin-top:0;">Upload Project Folder</button>
+        <button class="btn mini" id="btnGodotZip">Upload Project .zip</button>
+        <input type="file" id="godotFolderInput" webkitdirectory directory multiple style="display:none;">
+        <input type="file" id="godotZipInput" accept=".zip" style="display:none;">
+        <div class="formats-line">Reads .tscn scene graph + matches res:// paths to uploaded assets. Only visual MeshInstance3D nodes are imported.</div>
+        <div id="godotStatus" class="hint" style="display:none;"></div>
       </div>
     </div>
 
@@ -435,6 +444,7 @@ select{
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
 (function(){
 "use strict";
@@ -696,6 +706,278 @@ document.getElementById('animPlay').addEventListener('click', ()=>{
   playing = !playing;
   activeAction.paused = !playing;
   document.getElementById('playIcon').setAttribute('d', playing ? 'M6 5h4v14H6zM14 5h4v14h-4z' : 'M8 5v14l11-7z');
+});
+
+/* ================= Godot .tscn import module ================= */
+const godotStatusEl = document.getElementById('godotStatus');
+function godotStatus(msg){ godotStatusEl.style.display='block'; godotStatusEl.textContent = msg; }
+
+/* ---- Asset map: normalized "res://"-relative path -> File/Blob ---- */
+function buildAssetMapFromFileList(fileList){
+  const map = new Map();
+  for (const f of fileList){
+    const rel = (f.webkitRelativePath || f.name).replace(/\\/g,'/');
+    const parts = rel.split('/');
+    const key = parts.length > 1 ? parts.slice(1).join('/') : rel; // strip the top project folder
+    map.set(key.toLowerCase(), f);
+  }
+  return map;
+}
+async function buildAssetMapFromZip(file){
+  const zip = await JSZip.loadAsync(file);
+  const entries = Object.values(zip.files).filter(e=>!e.dir);
+  // detect a single common root folder to strip (mirrors how a project folder zips)
+  let root = null;
+  for (const e of entries){
+    const top = e.name.split('/')[0];
+    if (root === null) root = top; else if (root !== top) { root = ''; break; }
+  }
+  const map = new Map();
+  for (const e of entries){
+    let key = e.name;
+    if (root) key = key.slice(root.length + 1);
+    if (!key) continue;
+    const blob = await e.async('blob');
+    blob.name = key.split('/').pop();
+    map.set(key.toLowerCase(), blob);
+  }
+  return map;
+}
+function resolveResPath(assetMap, resPath){
+  if (!resPath) return null;
+  const clean = resPath.replace('res://','').replace(/^\/+/,'').toLowerCase();
+  if (assetMap.has(clean)) return assetMap.get(clean);
+  const base = clean.split('/').pop();
+  for (const [k,v] of assetMap){ if (k.split('/').pop() === base) return v; }
+  return null;
+}
+
+/* ---- Tiny GDScript-value parser: handles Vector3(), Color(), Transform3D(), "strings", numbers, bools, ExtResource("id")/SubResource("id") ---- */
+function parseGdValue(str){
+  str = str.trim();
+  let m;
+  if ((m = str.match(/^Ext[Rr]esource\(\s*"?([^")]+?)"?\s*\)$/))) return { ref:'ext', id:m[1].trim() };
+  if ((m = str.match(/^Sub[Rr]esource\(\s*"?([^")]+?)"?\s*\)$/))) return { ref:'sub', id:m[1].trim() };
+  if ((m = str.match(/^Vector3\(([^)]+)\)$/))) { const [x,y,z]=m[1].split(',').map(Number); return {x,y,z}; }
+  if ((m = str.match(/^Vector2\(([^)]+)\)$/))) { const [x,y]=m[1].split(',').map(Number); return {x,y}; }
+  if ((m = str.match(/^Color\(([^)]+)\)$/))) { const p=m[1].split(',').map(Number); return {r:p[0],g:p[1],b:p[2],a:p[3]??1}; }
+  if ((m = str.match(/^Transform3D?\(([^)]+)\)$/))) return { transform: m[1].split(',').map(Number) };
+  if ((m = str.match(/^"(.*)"$/))) return m[1];
+  if (str === 'true') return true;
+  if (str === 'false') return false;
+  if (!isNaN(parseFloat(str)) && /^-?[\d.]+$/.test(str)) return parseFloat(str);
+  return str;
+}
+
+/* ---- Parse a .tscn text file into { extResources, subResources, nodes } ---- */
+function parseTscn(text){
+  const lines = text.split(/\r?\n/);
+  const extResources = {}, subResources = {}, nodes = [];
+  let current = null;
+  for (let raw of lines){
+    const line = raw.trim();
+    if (!line || line.startsWith(';')) continue;
+    const headerMatch = line.match(/^\[(\w+)(.*)\]$/);
+    if (headerMatch){
+      const tag = headerMatch[1];
+      const attrs = {};
+      const attrRe = /(\w+)\s*=\s*"([^"]*)"/g;
+      let am;
+      while ((am = attrRe.exec(headerMatch[2]))) attrs[am[1]] = am[2];
+      if (tag === 'ext_resource'){
+        current = { kind:'ext', id:attrs.id, type:attrs.type, path:attrs.path };
+        extResources[attrs.id] = current;
+      } else if (tag === 'sub_resource'){
+        current = { kind:'sub', id:attrs.id, type:attrs.type, props:{} };
+        subResources[attrs.id] = current;
+      } else if (tag === 'node'){
+        current = { kind:'node', name:attrs.name, type:attrs.type, parent:attrs.parent, props:{} };
+        nodes.push(current);
+      } else { current = null; }
+      continue;
+    }
+    if (!current || current.kind === 'ext') continue;
+    const propMatch = line.match(/^([\w\/]+)\s*=\s*(.+)$/);
+    if (propMatch) current.props[propMatch[1]] = parseGdValue(propMatch[2]);
+  }
+  return { extResources, subResources, nodes };
+}
+
+/* ---- Resolve a value that may be an ExtResource/SubResource reference ---- */
+function resolveRef(val, ctx){
+  if (val && typeof val === 'object' && val.ref === 'ext') return ctx.extResources[val.id];
+  if (val && typeof val === 'object' && val.ref === 'sub') return ctx.subResources[val.id];
+  return val;
+}
+
+/* ---- Build a THREE.Matrix4 from Godot's Transform3D(12 floats: basis 3x3 columns + origin) ---- */
+function matrixFromGodotTransform(t){
+  const m = new THREE.Matrix4();
+  // Godot stores basis column-major (xx,xy,xz, yx,yy,yz, zx,zy,zz) then origin(ox,oy,oz)
+  m.set(
+    t[0], t[3], t[6], t[9],
+    t[1], t[4], t[7], t[10],
+    t[2], t[5], t[8], t[11],
+    0,0,0,1
+  );
+  return m;
+}
+
+/* ---- Procedural primitive geometry for Godot built-in meshes (no external asset needed) ---- */
+function godotPrimitiveGeometry(subRes){
+  const p = subRes.props;
+  switch (subRes.type){
+    case 'BoxMesh': {
+      const s = p.size || {x:1,y:1,z:1};
+      return new THREE.BoxGeometry(s.x, s.y, s.z);
+    }
+    case 'SphereMesh': {
+      const r = p.radius ?? 0.5;
+      return new THREE.SphereGeometry(r, 24, 16);
+    }
+    case 'CylinderMesh': {
+      const rt = p.top_radius ?? 0.5, rb = p.bottom_radius ?? 0.5, h = p.height ?? 2;
+      return new THREE.CylinderGeometry(rt, rb, h, 24);
+    }
+    case 'CapsuleMesh': {
+      // CylinderGeometry is used as an approximation since CapsuleGeometry needs three.js r142+
+      const r = p.radius ?? 0.5, h = p.height ?? 2;
+      return new THREE.CylinderGeometry(r, r, Math.max(h - r*2, 0.001), 20);
+    }
+    case 'PlaneMesh': {
+      const s = p.size || {x:2,y:2};
+      const g = new THREE.PlaneGeometry(s.x, s.y);
+      g.rotateX(-Math.PI/2);
+      return g;
+    }
+    default: return new THREE.BoxGeometry(0.4,0.4,0.4); // fallback placeholder
+  }
+}
+
+/* ---- Build a THREE material from a StandardMaterial3D / ORMMaterial3D sub_resource ---- */
+function godotMaterialToThree(matRes, ctx, assetMap){
+  if (!matRes) return new THREE.MeshStandardMaterial({ color:0x9a9ba3, roughness:0.6, metalness:0.05 });
+  const p = matRes.props;
+  const params = { roughness: p.roughness ?? 0.6, metalness: p.metallic ?? 0.0 };
+  if (p.albedo_color) params.color = new THREE.Color(p.albedo_color.r, p.albedo_color.g, p.albedo_color.b);
+  const mat = new THREE.MeshStandardMaterial(params);
+  const texRef = resolveRef(p.albedo_texture, ctx);
+  if (texRef && texRef.path){
+    const file = resolveResPath(assetMap, texRef.path);
+    if (file){
+      const url = URL.createObjectURL(file);
+      new THREE.TextureLoader().load(url, tex=>{ tex.encoding = THREE.sRGBEncoding; mat.map = tex; mat.needsUpdate = true; URL.revokeObjectURL(url); });
+    } else {
+      godotStatus('Peringatan: tekstur tidak ditemukan di file yang diupload: ' + texRef.path);
+    }
+  }
+  return mat;
+}
+
+/* ---- Main entry: parse a .tscn File and render only MeshInstance3D nodes ---- */
+async function loadGodotScene(tscnFile, assetMap){
+  const text = await tscnFile.text();
+  const ctx = parseTscn(text);
+  clearModel();
+  const group = new THREE.Group();
+  let imported = 0, skipped = 0, pending = [];
+
+  for (const node of ctx.nodes){
+    if (node.type !== 'MeshInstance3D'){ skipped++; continue; }
+
+    const meshVal = resolveRef(node.props.mesh, ctx);
+    let materialOverride = resolveRef(node.props['surface_material_override/0'], ctx);
+    const matrix = node.props.transform ? matrixFromGodotTransform(node.props.transform.transform) : new THREE.Matrix4();
+
+    if (!meshVal){ skipped++; continue; }
+
+    if (meshVal.kind === 'ext'){
+      // External model file (.glb/.gltf) referenced by ext_resource
+      const file = resolveResPath(assetMap, meshVal.path);
+      if (!file){ godotStatus('Peringatan: aset model tidak ditemukan: ' + meshVal.path); skipped++; continue; }
+      const url = URL.createObjectURL(file);
+      const p = new Promise(res=>{
+        new THREE.GLTFLoader().load(url, gltf=>{
+          const obj = gltf.scene;
+          obj.applyMatrix4(matrix);
+          if (materialOverride){
+            const threeMat = godotMaterialToThree(materialOverride, ctx, assetMap);
+            obj.traverse(o=>{ if (o.isMesh) o.material = threeMat; });
+          }
+          obj.traverse(o=>{ if (o.isMesh){ o.castShadow = true; o.receiveShadow = true; } });
+          group.add(obj);
+          imported++;
+          URL.revokeObjectURL(url);
+          res();
+        }, undefined, ()=>{ godotStatus('Gagal memuat aset: ' + meshVal.path); res(); });
+      });
+      pending.push(p);
+    } else if (meshVal.kind === 'sub'){
+      // Built-in Godot primitive mesh: generate procedurally
+      const geo = godotPrimitiveGeometry(meshVal);
+      const matRes = materialOverride || resolveRef(meshVal.props.material, ctx);
+      const mat = godotMaterialToThree(matRes, ctx, assetMap);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.applyMatrix4(matrix);
+      mesh.castShadow = true; mesh.receiveShadow = true;
+      group.add(mesh);
+      imported++;
+    }
+  }
+
+  await Promise.all(pending);
+
+  if (imported === 0){
+    toast('Tidak ada MeshInstance3D visual yang berhasil diimpor dari scene ini.', true);
+    godotStatus('0 mesh diimpor · ' + skipped + ' node non-visual dilewati.');
+    return;
+  }
+
+  currentModel = group;
+  rootGroup.add(group);
+  frameModel(group);
+  setEmptyState(true);
+
+  document.getElementById('fname').textContent = tscnFile.name;
+  document.getElementById('infoName').textContent = tscnFile.name;
+  document.getElementById('infoFormat').textContent = 'Godot .tscn';
+  document.getElementById('infoVerts').textContent = '—';
+  document.getElementById('infoTris').textContent = '—';
+  document.getElementById('infoMats').textContent = '—';
+  document.getElementById('infoTex').textContent = '—';
+  document.getElementById('infoAnim').textContent = '0';
+  godotStatus(imported + ' mesh diimpor · ' + skipped + ' node non-visual (collision/light/dsb.) dilewati.');
+  toast('Godot scene dimuat: ' + imported + ' mesh visual diimpor.');
+}
+
+/* ---- Wire up folder/zip inputs: find the .tscn, build asset map, parse & render ---- */
+async function handleGodotUpload(assetMapPromise){
+  try{
+    const assetMap = await assetMapPromise;
+    let tscnFile = null;
+    for (const [key, v] of assetMap){
+      if (key.endsWith('.tscn')) { tscnFile = v; if (!tscnFile.name) tscnFile.name = key.split('/').pop(); break; }
+    }
+    if (!tscnFile){
+      toast('Tidak ditemukan file .tscn di dalam folder/zip yang diupload.', true);
+      return;
+    }
+    godotStatus('Memproses ' + (tscnFile.name || 'scene') + ' …');
+    await loadGodotScene(tscnFile, assetMap);
+  } catch(e){
+    console.error(e);
+    toast('Gagal memproses project Godot: ' + e.message, true);
+  }
+}
+document.getElementById('btnGodotFolder').addEventListener('click', ()=>document.getElementById('godotFolderInput').click());
+document.getElementById('btnGodotZip').addEventListener('click', ()=>document.getElementById('godotZipInput').click());
+document.getElementById('godotFolderInput').addEventListener('change', e=>{
+  if (!e.target.files.length) return;
+  handleGodotUpload(Promise.resolve(buildAssetMapFromFileList(e.target.files)));
+});
+document.getElementById('godotZipInput').addEventListener('change', e=>{
+  const f = e.target.files[0]; if (!f) return;
+  handleGodotUpload(buildAssetMapFromZip(f));
 });
 
 /* ---------------- Import UI ---------------- */
