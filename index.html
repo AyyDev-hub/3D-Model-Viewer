@@ -522,6 +522,7 @@ function resize(){
 new ResizeObserver(resize).observe(wrap);
 resize();
 
+let mixer = null;
 function animate(){
   requestAnimationFrame(animate);
   controls.update();
@@ -532,7 +533,7 @@ const clock = new THREE.Clock();
 animate();
 
 /* ---------------- Model state ---------------- */
-let currentModel = null, mixer = null, clips = [], activeAction = null;
+let currentModel = null, clips = [], activeAction = null;
 const rootGroup = new THREE.Group();
 scene.add(rootGroup);
 
