@@ -1,0 +1,1014 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Forge — 3D Model Viewer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0c0d10; --panel:#131419; --panel-2:#191a20; --border:#26272f;
+  --text:#e8e8ec; --text-dim:#8b8c96; --text-faint:#57585f;
+  --accent:#e3a84e; --accent-dim:#7a5f2c; --danger:#e2685b;
+  --radius:6px;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:border-box;}
+html,body{height:100%;margin:0;}
+body{
+  background:var(--bg); color:var(--text); font-family:'Inter',sans-serif; font-size:13px;
+  overflow:hidden; display:flex; flex-direction:column;
+}
+::-webkit-scrollbar{width:8px;height:8px;}
+::-webkit-scrollbar-thumb{background:#2a2b33;border-radius:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+
+/* ---------- Top bar ---------- */
+#topbar{
+  height:48px; flex:0 0 auto; display:flex; align-items:center; gap:16px;
+  padding:0 14px; padding-top:env(safe-area-inset-top,0px);
+  background:var(--panel); border-bottom:1px solid var(--border); z-index:20;
+}
+#topbar .brand{display:flex;align-items:center;gap:8px;font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:15px;letter-spacing:.2px;}
+#topbar .brand .dot{width:8px;height:8px;border-radius:2px;background:var(--accent);}
+#topbar .fname{color:var(--text-dim);font-size:12px;margin-left:2px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#topbar .spacer{flex:1;}
+.btn{
+  background:var(--panel-2); border:1px solid var(--border); color:var(--text);
+  border-radius:var(--radius); padding:7px 12px; font-size:12.5px; font-weight:500;
+  cursor:pointer; display:inline-flex; align-items:center; gap:6px; font-family:inherit;
+  transition:border-color .12s,background .12s;
+}
+.btn:hover{border-color:#3a3c47; background:#1c1d24;}
+.btn:active{transform:translateY(1px);}
+.btn.primary{background:var(--accent); border-color:var(--accent); color:#1a1305; font-weight:600;}
+.btn.primary:hover{background:#edb45f;}
+.btn:disabled{opacity:.4; cursor:not-allowed;}
+.btn svg{width:14px;height:14px;flex:0 0 auto;}
+
+/* ---------- Main layout ---------- */
+#main{flex:1; display:flex; min-height:0;}
+.sidebar{
+  width:260px; flex:0 0 auto; background:var(--panel); border-right:1px solid var(--border);
+  overflow-y:auto; display:flex; flex-direction:column;
+}
+#right{border-right:none; border-left:1px solid var(--border);}
+#viewport-wrap{flex:1; position:relative; min-width:0; background:#050506;}
+#viewport-wrap canvas{display:block; width:100%; height:100%;}
+
+.section{border-bottom:1px solid var(--border);}
+.section-head{
+  display:flex; align-items:center; gap:8px; padding:11px 14px; cursor:pointer; user-select:none;
+  font-weight:600; font-size:12.5px; color:var(--text);
+}
+.section-head:hover{background:var(--panel-2);}
+.section-head .chev{margin-left:auto; color:var(--text-faint); transition:transform .15s; font-size:10px;}
+.section.open .chev{transform:rotate(90deg);}
+.section-body{padding:2px 14px 14px; display:none;}
+.section.open .section-body{display:block;}
+.section-icon{width:15px;height:15px;flex:0 0 auto;color:var(--text-dim);}
+
+label.field{display:block; margin-top:10px;}
+label.field .lbl{display:flex;justify-content:space-between;color:var(--text-dim);font-size:11.5px;margin-bottom:5px;}
+label.field .lbl span.val{font-family:'IBM Plex Mono',monospace;color:var(--text);font-size:11px;}
+input[type=range]{
+  width:100%; height:3px; -webkit-appearance:none; background:var(--border); border-radius:2px; outline:none;
+}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none; width:13px; height:13px; border-radius:50%; background:var(--accent); cursor:pointer; border:2px solid #1a1305;
+}
+input[type=number],input[type=text]{
+  width:100%; background:var(--panel-2); border:1px solid var(--border); color:var(--text);
+  border-radius:5px; padding:6px 8px; font-size:12px; font-family:'IBM Plex Mono',monospace;
+}
+input[type=color]{width:34px;height:28px;border:1px solid var(--border);border-radius:5px;background:none;padding:2px;cursor:pointer;}
+select{
+  width:100%; background:var(--panel-2); border:1px solid var(--border); color:var(--text);
+  border-radius:5px; padding:6px 8px; font-size:12px; font-family:inherit;
+}
+.row3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px;}
+.row2{display:grid; grid-template-columns:1fr 1fr; gap:6px;}
+.row3 .axis{position:relative;}
+.row3 .axis span{position:absolute;left:6px;top:5px;font-size:9px;color:var(--text-faint);z-index:1;pointer-events:none;}
+.row3 .axis input{padding-left:16px;}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;margin-top:10px;}
+.toggle-row .lbl{color:var(--text-dim);font-size:11.5px;}
+.switch{width:32px;height:18px;border-radius:10px;background:var(--panel-2);border:1px solid var(--border);position:relative;cursor:pointer;flex:0 0 auto;}
+.switch.on{background:var(--accent-dim);border-color:var(--accent);}
+.switch .knob{position:absolute;top:1px;left:1px;width:14px;height:14px;border-radius:50%;background:var(--text-dim);transition:left .15s;}
+.switch.on .knob{left:15px;background:var(--accent);}
+.presetgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;}
+.preset-btn{
+  background:var(--panel-2);border:1px solid var(--border);color:var(--text-dim);border-radius:5px;
+  padding:7px 6px;font-size:11px;cursor:pointer;text-align:center;transition:all .12s;
+}
+.preset-btn:hover{color:var(--text);border-color:#3a3c47;}
+.preset-btn.active{color:var(--accent);border-color:var(--accent-dim);background:#241d10;}
+.swatchgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-top:8px;}
+.swatch{width:100%;aspect-ratio:1;border-radius:5px;border:1px solid var(--border);cursor:pointer;}
+.swatch.active{outline:2px solid var(--accent);outline-offset:1px;}
+.tabs{display:flex;gap:4px;margin-top:2px;}
+.tab{flex:1;text-align:center;padding:6px;border-radius:5px;font-size:11px;color:var(--text-dim);cursor:pointer;border:1px solid transparent;}
+.tab.active{background:var(--panel-2);color:var(--text);border-color:var(--border);}
+.hint{color:var(--text-faint);font-size:10.5px;margin-top:6px;line-height:1.5;}
+.mini{width:100%;margin-top:10px;justify-content:center;}
+.divider{height:1px;background:var(--border);margin:12px 0;}
+
+/* import zone */
+#dropzone{
+  border:1.5px dashed var(--border); border-radius:8px; padding:22px 10px; text-align:center;
+  color:var(--text-dim); font-size:12px; cursor:pointer; transition:all .15s; margin-top:8px;
+}
+#dropzone:hover{border-color:#3a3c47;}
+#dropzone.drag{border-color:var(--accent); background:#1a1509; color:var(--accent);}
+#dropzone svg{width:26px;height:26px;margin-bottom:8px;color:var(--text-faint);}
+#dropzone.drag svg{color:var(--accent);}
+.formats-line{color:var(--text-faint);font-size:10.5px;margin-top:10px;}
+
+/* drag overlay on viewport */
+#dragOverlay{
+  position:absolute; inset:0; background:rgba(12,13,16,.82); backdrop-filter:blur(2px);
+  display:none; align-items:center; justify-content:center; flex-direction:column; gap:10px;
+  border:2px dashed var(--accent); z-index:15; pointer-events:none;
+}
+#dragOverlay.show{display:flex;}
+#dragOverlay .big{font-family:'Space Grotesk',sans-serif;font-size:17px;color:var(--accent);}
+
+/* viewport chrome */
+#vp-hud{position:absolute;left:14px;bottom:14px;display:flex;gap:8px;z-index:10;}
+.hud-btn{
+  width:32px;height:32px;border-radius:6px;background:rgba(19,20,25,.85);border:1px solid var(--border);
+  display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text-dim);backdrop-filter:blur(4px);
+}
+.hud-btn:hover{color:var(--text);border-color:#3a3c47;}
+.hud-btn svg{width:16px;height:16px;}
+#empty-state{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;
+  color:var(--text-faint); text-align:center; pointer-events:none;
+}
+#empty-state.hidden{display:none;}
+#empty-state svg{width:44px;height:44px;opacity:.5;}
+#empty-state .t1{font-family:'Space Grotesk',sans-serif;font-size:16px;color:var(--text-dim);}
+#empty-state .t2{font-size:12px;max-width:260px;}
+
+#anim-bar{
+  position:absolute; left:50%; bottom:14px; transform:translateX(-50%); display:none; gap:10px; align-items:center;
+  background:rgba(19,20,25,.9); border:1px solid var(--border); border-radius:8px; padding:6px 12px; z-index:10; backdrop-filter:blur(4px);
+}
+#anim-bar.show{display:flex;}
+#anim-bar select{width:150px;padding:4px 6px;font-size:11px;}
+
+/* toast */
+#toast{
+  position:fixed; top:58px; left:50%; transform:translateX(-50%) translateY(-8px); z-index:100;
+  background:#1c1d24; border:1px solid var(--border); border-left:3px solid var(--accent); border-radius:6px;
+  padding:10px 16px; font-size:12.5px; opacity:0; pointer-events:none; transition:all .2s; max-width:420px;
+}
+#toast.err{border-left-color:var(--danger);}
+#toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+
+#initError{
+  display:none; position:absolute; inset:0; z-index:30; background:rgba(8,8,10,.96);
+  align-items:center; justify-content:center; text-align:center; padding:24px;
+}
+#initError.show{display:flex;}
+#initError .box{max-width:420px;}
+#initError .box h3{font-family:'Space Grotesk',sans-serif;color:var(--danger);margin:0 0 8px;font-size:16px;}
+#initError .box p{color:var(--text-dim);font-size:12.5px;line-height:1.6;margin:0 0 4px;}
+#initError .box code{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-faint);}
+
+/* model info */
+.info-row{display:flex;justify-content:space-between;padding:5px 0;font-size:11.5px;border-bottom:1px solid #1e1f26;}
+.info-row .k{color:var(--text-faint);}
+.info-row .v{font-family:'IBM Plex Mono',monospace;color:var(--text-dim);}
+
+/* screenshot */
+.res-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;}
+#customRes{display:none;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;}
+#customRes.show{display:grid;}
+#screenshotPreview{
+  display:none; margin-top:12px; border:1px solid var(--border); border-radius:6px; overflow:hidden; background:#000;
+}
+#screenshotPreview.show{display:block;}
+#screenshotPreview img{width:100%;display:block;}
+#shotMeta{padding:8px 10px;font-size:11px;color:var(--text-dim);display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;}
+.shot-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:0 10px 10px;}
+
+@media (max-width:900px){
+  .sidebar{width:210px;}
+  #topbar .fname{display:none;}
+}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div class="brand"><span class="dot"></span>Forge</div>
+  <div class="fname" id="fname">No model loaded</div>
+  <div class="spacer"></div>
+  <button class="btn" id="btnResetAll" title="Reset scene to defaults">Reset</button>
+  <button class="btn primary" id="btnShot">Screenshot</button>
+</div>
+
+<div id="main">
+  <!-- LEFT SIDEBAR -->
+  <div class="sidebar" id="left">
+
+    <div class="section open" data-s="import">
+      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>Import Model<span class="chev">▸</span></div>
+      <div class="section-body">
+        <div id="dropzone">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+          <div>Drop your 3D model here</div>
+          <div style="margin-top:4px;font-size:10.5px;">or click to browse</div>
+        </div>
+        <input type="file" id="fileInput" accept=".glb,.gltf,.obj,.stl" style="display:none;">
+        <div class="formats-line">Supported: GLB, GLTF, OBJ, STL</div>
+      </div>
+    </div>
+
+    <div class="section" data-s="transform">
+      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 4h16v16H4z"/><path d="M9 4v16M4 9h16"/></svg>Transform<span class="chev">▸</span></div>
+      <div class="section-body">
+        <label class="field"><div class="lbl">Position</div></label>
+        <div class="row3">
+          <div class="axis"><span>X</span><input type="number" step="0.1" id="posX" value="0"></div>
+          <div class="axis"><span>Y</span><input type="number" step="0.1" id="posY" value="0"></div>
+          <div class="axis"><span>Z</span><input type="number" step="0.1" id="posZ" value="0"></div>
+        </div>
+        <label class="field"><div class="lbl">Rotation (°)</div></label>
+        <div class="row3">
+          <div class="axis"><span>X</span><input type="number" step="1" id="rotX" value="0"></div>
+          <div class="axis"><span>Y</span><input type="number" step="1" id="rotY" value="0"></div>
+          <div class="axis"><span>Z</span><input type="number" step="1" id="rotZ" value="0"></div>
+        </div>
+        <label class="field"><div class="lbl">Scale</div></label>
+        <div class="row3">
+          <div class="axis"><span>X</span><input type="number" step="0.1" id="scaX" value="1"></div>
+          <div class="axis"><span>Y</span><input type="number" step="0.1" id="scaY" value="1"></div>
+          <div class="axis"><span>Z</span><input type="number" step="0.1" id="scaZ" value="1"></div>
+        </div>
+        <label class="field"><div class="lbl">Uniform scale<span class="val" id="uniScaleVal">1.0</span></div><input type="range" id="uniScale" min="0.05" max="5" step="0.01" value="1"></label>
+        <button class="btn mini" id="btnResetTransform">Reset Transform</button>
+      </div>
+    </div>
+
+    <div class="section" data-s="camera">
+      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3"/></svg>Camera<span class="chev">▸</span></div>
+      <div class="section-body">
+        <div class="presetgrid" id="camPresets">
+          <div class="preset-btn" data-cam="front">Front</div>
+          <div class="preset-btn" data-cam="back">Back</div>
+          <div class="preset-btn" data-cam="left">Left</div>
+          <div class="preset-btn" data-cam="right">Right</div>
+          <div class="preset-btn" data-cam="top">Top</div>
+          <div class="preset-btn" data-cam="bottom">Bottom</div>
+          <div class="preset-btn active" data-cam="iso">Isometric</div>
+          <div class="preset-btn" data-cam="showcase">Showcase</div>
+          <div class="preset-btn" data-cam="closeup">Close-up</div>
+          <div class="preset-btn" data-cam="portrait">Portrait</div>
+        </div>
+        <label class="field"><div class="lbl">Field of View<span class="val" id="fovVal">45°</span></div><input type="range" id="fov" min="15" max="100" value="45"></label>
+        <button class="btn mini" id="btnResetCam">Reset Camera</button>
+      </div>
+    </div>
+
+    <div class="section" data-s="background">
+      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.6"/><path d="M21 15l-5-5L5 21"/></svg>Background<span class="chev">▸</span></div>
+      <div class="section-body">
+        <div class="tabs" id="bgTabs">
+          <div class="tab active" data-bg="solid">Solid</div>
+          <div class="tab" data-bg="gradient">Gradient</div>
+          <div class="tab" data-bg="image">Image</div>
+        </div>
+        <div id="bgSolidPane">
+          <div class="swatchgrid" id="bgPresetSwatches"></div>
+          <label class="field"><div class="lbl">Custom color</div><input type="color" id="bgColor" value="#101114"></label>
+        </div>
+        <div id="bgGradientPane" style="display:none;">
+          <label class="field"><div class="lbl">Top color</div><input type="color" id="bgGradTop" value="#23262f"></label>
+          <label class="field"><div class="lbl">Bottom color</div><input type="color" id="bgGradBottom" value="#08090b"></label>
+        </div>
+        <div id="bgImagePane" style="display:none;">
+          <button class="btn mini" id="btnBgImage" style="margin-top:8px;">Upload Image</button>
+          <input type="file" id="bgImageInput" accept="image/*" style="display:none;">
+        </div>
+      </div>
+    </div>
+
+    <div class="section" data-s="environment">
+      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a13 13 0 010 18 13 13 0 010-18z"/></svg>Environment<span class="chev">▸</span></div>
+      <div class="section-body">
+        <div class="presetgrid" id="envPresets">
+          <div class="preset-btn active" data-env="studio">Studio</div>
+          <div class="preset-btn" data-env="soft">Soft Studio</div>
+          <div class="preset-btn" data-env="day">Day</div>
+          <div class="preset-btn" data-env="sunset">Sunset</div>
+          <div class="preset-btn" data-env="night">Night</div>
+          <div class="preset-btn" data-env="dramatic">Dramatic</div>
+          <div class="preset-btn" data-env="outdoor">Outdoor</div>
+          <div class="preset-btn" data-env="neutral">Neutral</div>
+        </div>
+        <label class="field"><div class="lbl">Intensity<span class="val" id="envIntVal">1.0</span></div><input type="range" id="envInt" min="0" max="3" step="0.05" value="1"></label>
+        <label class="field"><div class="lbl">Rotation<span class="val" id="envRotVal">0°</span></div><input type="range" id="envRot" min="0" max="360" value="0"></label>
+        <div class="toggle-row"><span class="lbl">Environment lighting</span><div class="switch on" id="envToggle"><div class="knob"></div></div></div>
+      </div>
+    </div>
+
+    <div class="section" data-s="lighting">
+      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 18h6M10 21h4M12 3a6 6 0 00-3.5 10.9c.5.4.8.9.8 1.5v.1h5.4v-.1c0-.6.3-1.1.8-1.5A6 6 0 0012 3z"/></svg>Lighting<span class="chev">▸</span></div>
+      <div class="section-body">
+        <div class="presetgrid" id="lightPresets">
+          <div class="preset-btn active" data-light="studio">Studio</div>
+          <div class="preset-btn" data-light="soft">Soft</div>
+          <div class="preset-btn" data-light="dramatic">Dramatic</div>
+          <div class="preset-btn" data-light="bright">Bright</div>
+          <div class="preset-btn" data-light="neutral">Neutral</div>
+        </div>
+        <label class="field"><div class="lbl">Main light intensity<span class="val" id="mainIntVal">1.2</span></div><input type="range" id="mainInt" min="0" max="4" step="0.05" value="1.2"></label>
+        <label class="field"><div class="lbl">Main light angle<span class="val" id="mainRotVal">45°</span></div><input type="range" id="mainRot" min="0" max="360" value="45"></label>
+        <div class="toggle-row"><span class="lbl">Shadows</span><div class="switch on" id="shadowToggle"><div class="knob"></div></div></div>
+        <div class="toggle-row"><span class="lbl">Ground plane</span><div class="switch on" id="groundToggle"><div class="knob"></div></div></div>
+      </div>
+    </div>
+
+    <div class="section" data-s="presets">
+      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 2l3 7h7l-5.5 4.5L18.5 21 12 16.5 5.5 21l2-7.5L2 9h7z"/></svg>Presets<span class="chev">▸</span></div>
+      <div class="section-body">
+        <div class="presetgrid" id="templatePresets">
+          <div class="preset-btn" data-tpl="item">Item Preview</div>
+          <div class="preset-btn" data-tpl="skin">Skin Preview</div>
+          <div class="preset-btn" data-tpl="showcase">Showcase</div>
+          <div class="preset-btn" data-tpl="product">Product</div>
+        </div>
+        <div class="hint">Applies matching camera, background, and environment settings in one click.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- VIEWPORT -->
+  <div id="viewport-wrap">
+    <div id="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M12 2l9 5v10l-9 5-9-5V7z"/><path d="M3 7l9 5 9-5M12 12v10"/></svg>
+      <div class="t1">No model loaded</div>
+      <div class="t2">Import or drag & drop a GLB, GLTF, OBJ, or STL file to get started</div>
+    </div>
+    <div id="dragOverlay"><div class="big">Drop your 3D model here</div></div>
+    <div id="initError">
+      <div class="box">
+        <h3>3D engine failed to start</h3>
+        <p>The viewport couldn't initialize — usually this means WebGL is disabled in this browser/context, or the Three.js library failed to load from the CDN.</p>
+        <p>Try opening this page in a standard desktop browser (Chrome, Firefox, Edge, Safari) with hardware acceleration enabled, or check your network/ad-blocker.</p>
+        <p><code id="initErrorDetail"></code></p>
+      </div>
+    </div>
+    <div id="vp-hud">
+      <div class="hud-btn" id="hudFocus" title="Focus on model"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></div>
+      <div class="hud-btn" id="hudGrid" title="Toggle grid"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg></div>
+    </div>
+    <div id="anim-bar">
+      <div class="hud-btn" id="animPlay" style="width:26px;height:26px;"><svg viewBox="0 0 24 24" fill="currentColor"><path id="playIcon" d="M8 5v14l11-7z"/></svg></div>
+      <select id="animSelect"></select>
+    </div>
+  </div>
+
+  <!-- RIGHT SIDEBAR -->
+  <div class="sidebar" id="right">
+    <div class="section open" data-s="shot">
+      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3.5"/><path d="M8 6l1.5-2h5L16 6"/></svg>Screenshot<span class="chev">▸</span></div>
+      <div class="section-body">
+        <label class="field"><div class="lbl">Resolution</div></label>
+        <div class="res-grid" id="resGrid">
+          <div class="preset-btn" data-res="256,256">256×256</div>
+          <div class="preset-btn" data-res="512,512">512×512</div>
+          <div class="preset-btn active" data-res="1024,1024">1024×1024</div>
+          <div class="preset-btn" data-res="1920,1080">1920×1080</div>
+          <div class="preset-btn" data-res="1080,1920">1080×1920</div>
+          <div class="preset-btn" data-res="1200,1200">1200×1200</div>
+          <div class="preset-btn" data-res="custom" id="resCustomBtn">Custom</div>
+        </div>
+        <div class="res-grid" id="customRes">
+          <input type="number" id="customW" placeholder="Width" value="1024">
+          <input type="number" id="customH" placeholder="Height" value="1024">
+        </div>
+        <label class="field"><div class="lbl">Format</div>
+          <select id="shotFormat"><option value="png">PNG</option><option value="jpeg">JPG</option><option value="webp">WebP</option></select>
+        </label>
+        <label class="field"><div class="lbl">Transparent background</div></label>
+        <div class="toggle-row" style="margin-top:2px;"><span class="lbl">Transparent PNG</span><div class="switch" id="transToggle"><div class="knob"></div></div></div>
+        <button class="btn primary mini" id="btnCapture">Capture Screenshot</button>
+
+        <div id="screenshotPreview">
+          <img id="shotImg" alt="Screenshot preview">
+          <div id="shotMeta"><span id="shotRes"></span><span id="shotFmt"></span></div>
+          <div class="shot-actions">
+            <button class="btn" id="btnDownload">Download</button>
+            <button class="btn" id="btnRetake">Retake</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section open" data-s="info">
+      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5M12 8h.01"/></svg>Model Info<span class="chev">▸</span></div>
+      <div class="section-body" id="infoBody">
+        <div class="info-row"><span class="k">File name</span><span class="v" id="infoName">—</span></div>
+        <div class="info-row"><span class="k">Format</span><span class="v" id="infoFormat">—</span></div>
+        <div class="info-row"><span class="k">Vertices</span><span class="v" id="infoVerts">—</span></div>
+        <div class="info-row"><span class="k">Triangles</span><span class="v" id="infoTris">—</span></div>
+        <div class="info-row"><span class="k">Materials</span><span class="v" id="infoMats">—</span></div>
+        <div class="info-row"><span class="k">Textures</span><span class="v" id="infoTex">—</span></div>
+        <div class="info-row"><span class="k">Animations</span><span class="v" id="infoAnim">—</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<!-- three.js r128 UMD build + classic (non-module) example loaders/controls -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+<script>
+(function(){
+"use strict";
+
+/* ---------------- Toast ---------------- */
+let toastTimer;
+function toast(msg, isErr){
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.toggle('err', !!isErr);
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>el.classList.remove('show'), 4200);
+}
+
+/* ---------------- UI bindings that must work even if the 3D engine fails ---------------- */
+document.querySelectorAll('.section-head').forEach(h=>{
+  h.addEventListener('click', ()=>{ h.parentElement.classList.toggle('open'); });
+});
+document.getElementById('bgTabs').addEventListener('click', e=>{
+  const tab = e.target.closest('.tab'); if (!tab) return;
+  document.querySelectorAll('#bgTabs .tab').forEach(t=>t.classList.remove('active'));
+  tab.classList.add('active');
+  ['Solid','Gradient','Image'].forEach(n=>{
+    document.getElementById('bg'+n+'Pane').style.display = (n.toLowerCase()===tab.dataset.bg) ? 'block':'none';
+  });
+});
+
+/* Everything below touches the WebGL/Three.js engine, so it's wrapped in a
+   try/catch: if it fails (e.g. WebGL unavailable, CDN blocked), the app shows
+   a clear banner instead of silently leaving every button unresponsive. */
+try {
+
+/* ---------------- Scene setup ---------------- */
+const wrap = document.getElementById('viewport-wrap');
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 2000);
+camera.position.set(3, 2.4, 4.2);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, preserveDrawingBuffer:true, alpha:true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.physicallyCorrectLights = true;
+wrap.appendChild(renderer.domElement);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.target.set(0, 0.8, 0);
+
+// lights
+const hemi = new THREE.HemisphereLight(0xffffff, 0x1a1a1f, 1.0);
+scene.add(hemi);
+const key = new THREE.DirectionalLight(0xffffff, 1.2);
+key.castShadow = true;
+key.shadow.mapSize.set(1024,1024);
+key.shadow.camera.near = 0.5; key.shadow.camera.far = 30;
+key.shadow.camera.left = -6; key.shadow.camera.right = 6; key.shadow.camera.top = 6; key.shadow.camera.bottom = -6;
+scene.add(key);
+const fill = new THREE.DirectionalLight(0xffffff, 0.35);
+fill.position.set(-4, 2, -3);
+scene.add(fill);
+
+// ground + grid
+const groundGeo = new THREE.PlaneGeometry(40,40);
+const groundMat = new THREE.ShadowMaterial({ opacity:0.28 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI/2;
+ground.receiveShadow = true;
+scene.add(ground);
+const grid = new THREE.GridHelper(20, 40, 0x3a3b45, 0x21222a);
+grid.position.y = 0.001;
+scene.add(grid);
+
+let bgSphere = null; // for image background
+
+function resize(){
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  camera.aspect = w/h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w,h,false);
+}
+new ResizeObserver(resize).observe(wrap);
+resize();
+
+function animate(){
+  requestAnimationFrame(animate);
+  controls.update();
+  if (mixer) mixer.update(clock.getDelta());
+  renderer.render(scene, camera);
+}
+const clock = new THREE.Clock();
+animate();
+
+/* ---------------- Model state ---------------- */
+let currentModel = null, mixer = null, clips = [], activeAction = null;
+const rootGroup = new THREE.Group();
+scene.add(rootGroup);
+
+function clearModel(){
+  if (currentModel){
+    rootGroup.remove(currentModel);
+    currentModel.traverse(o=>{
+      if (o.geometry) o.geometry.dispose();
+      if (o.material){
+        (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{
+          Object.values(m).forEach(v=>{ if (v && v.isTexture) v.dispose(); });
+          m.dispose();
+        });
+      }
+    });
+  }
+  currentModel = null; mixer = null; clips = [];
+  document.getElementById('anim-bar').classList.remove('show');
+}
+
+function frameModel(obj){
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z, 0.001);
+  const scale = 2.2 / maxDim;
+  obj.scale.setScalar(scale);
+  const box2 = new THREE.Box3().setFromObject(obj);
+  const center2 = box2.getCenter(new THREE.Vector3());
+  obj.position.sub(center2);
+  obj.position.y += (box2.getSize(new THREE.Vector3()).y/2);
+  controls.target.set(0, box2.getSize(new THREE.Vector3()).y/2, 0);
+  focusCamera();
+  syncTransformUI();
+}
+
+function focusCamera(){
+  const dist = 4.2;
+  const dir = new THREE.Vector3(1, 0.7, 1.2).normalize();
+  camera.position.copy(controls.target.clone().add(dir.multiplyScalar(dist)));
+  controls.update();
+}
+
+function setEmptyState(has){
+  document.getElementById('empty-state').classList.toggle('hidden', has);
+}
+
+/* ---------------- Loading ---------------- */
+const loadingManager = new THREE.LoadingManager();
+function extOf(name){ return name.split('.').pop().toLowerCase(); }
+
+function loadFile(file){
+  const ext = extOf(file.name);
+  const supported = ['glb','gltf','obj','stl'];
+  if (!supported.includes(ext)){
+    toast('Unable to load this model. "."' + ext + '" is not supported. Try GLB, GLTF, OBJ, or STL.', true);
+    return;
+  }
+  const url = URL.createObjectURL(file);
+  clearModel();
+
+  const onError = (e) => {
+    console.error(e);
+    toast('Unable to load this model. Please check that the file is a valid, uncorrupted ' + ext.toUpperCase() + ' file.', true);
+    URL.revokeObjectURL(url);
+  };
+
+  try{
+    if (ext === 'glb' || ext === 'gltf'){
+      const loader = new THREE.GLTFLoader();
+      loader.load(url, (gltf)=>{
+        const obj = gltf.scene;
+        finishLoad(obj, file, ext, gltf.animations || []);
+        URL.revokeObjectURL(url);
+      }, undefined, onError);
+    } else if (ext === 'obj'){
+      const loader = new THREE.OBJLoader();
+      loader.load(url, (obj)=>{
+        finishLoad(obj, file, ext, []);
+        URL.revokeObjectURL(url);
+      }, undefined, onError);
+    } else if (ext === 'stl'){
+      const loader = new THREE.STLLoader();
+      loader.load(url, (geometry)=>{
+        geometry.computeVertexNormals();
+        const mat = new THREE.MeshStandardMaterial({ color:0xbfc2cc, roughness:0.45, metalness:0.15 });
+        const mesh = new THREE.Mesh(geometry, mat);
+        const obj = new THREE.Group(); obj.add(mesh);
+        finishLoad(obj, file, ext, []);
+        URL.revokeObjectURL(url);
+      }, undefined, onError);
+    }
+  } catch(e){ onError(e); }
+}
+
+function finishLoad(obj, file, ext, animations){
+  let verts=0, tris=0, mats=new Set(), texs=new Set();
+  obj.traverse(o=>{
+    if (o.isMesh){
+      o.castShadow = true; o.receiveShadow = true;
+      const g = o.geometry;
+      if (g){
+        if (g.attributes && g.attributes.position) verts += g.attributes.position.count;
+        tris += g.index ? g.index.count/3 : (g.attributes.position ? g.attributes.position.count/3 : 0);
+      }
+      const ms = Array.isArray(o.material)?o.material:[o.material];
+      ms.forEach(m=>{
+        if (!m) return;
+        mats.add(m.uuid);
+        ['map','normalMap','roughnessMap','metalnessMap','emissiveMap','aoMap'].forEach(k=>{ if (m[k]) texs.add(m[k].uuid); });
+      });
+    }
+  });
+
+  currentModel = obj;
+  rootGroup.add(obj);
+  frameModel(obj);
+  setEmptyState(true);
+
+  document.getElementById('fname').textContent = file.name;
+  document.getElementById('infoName').textContent = file.name;
+  document.getElementById('infoFormat').textContent = ext.toUpperCase();
+  document.getElementById('infoVerts').textContent = verts.toLocaleString();
+  document.getElementById('infoTris').textContent = Math.round(tris).toLocaleString();
+  document.getElementById('infoMats').textContent = mats.size;
+  document.getElementById('infoTex').textContent = texs.size;
+  document.getElementById('infoAnim').textContent = animations.length;
+
+  const animBar = document.getElementById('anim-bar');
+  const animSelect = document.getElementById('animSelect');
+  animSelect.innerHTML = '';
+  if (animations.length){
+    mixer = new THREE.AnimationMixer(obj);
+    clips = animations;
+    clips.forEach((c,i)=>{
+      const opt = document.createElement('option');
+      opt.value = i; opt.textContent = c.name || ('Animation ' + (i+1));
+      animSelect.appendChild(opt);
+    });
+    playAnim(0);
+    animBar.classList.add('show');
+  } else {
+    animBar.classList.remove('show');
+  }
+
+  toast('Model loaded: ' + file.name);
+}
+
+let playing = true;
+function playAnim(idx){
+  if (activeAction) activeAction.stop();
+  activeAction = mixer.clipAction(clips[idx]);
+  activeAction.play();
+  playing = true;
+  document.getElementById('playIcon').setAttribute('d','M6 5h4v14H6zM14 5h4v14h-4z');
+}
+document.getElementById('animSelect').addEventListener('change', e=>playAnim(parseInt(e.target.value)));
+document.getElementById('animPlay').addEventListener('click', ()=>{
+  if (!activeAction) return;
+  playing = !playing;
+  activeAction.paused = !playing;
+  document.getElementById('playIcon').setAttribute('d', playing ? 'M6 5h4v14H6zM14 5h4v14h-4z' : 'M8 5v14l11-7z');
+});
+
+/* ---------------- Import UI ---------------- */
+const fileInput = document.getElementById('fileInput');
+document.getElementById('dropzone').addEventListener('click', ()=>fileInput.click());
+fileInput.addEventListener('change', e=>{ if (e.target.files[0]) loadFile(e.target.files[0]); });
+
+['dragenter','dragover'].forEach(ev=>wrap.addEventListener(ev, e=>{
+  e.preventDefault(); document.getElementById('dragOverlay').classList.add('show');
+}));
+['dragleave','drop'].forEach(ev=>wrap.addEventListener(ev, e=>{
+  e.preventDefault();
+  if (ev==='dragleave' && e.target !== wrap) return;
+  document.getElementById('dragOverlay').classList.remove('show');
+}));
+wrap.addEventListener('drop', e=>{
+  e.preventDefault();
+  const f = e.dataTransfer.files[0];
+  if (f) loadFile(f);
+});
+
+/* ---------------- Transform panel ---------------- */
+const posEls = ['posX','posY','posZ'].map(id=>document.getElementById(id));
+const rotEls = ['rotX','rotY','rotZ'].map(id=>document.getElementById(id));
+const scaEls = ['scaX','scaY','scaZ'].map(id=>document.getElementById(id));
+
+function syncTransformUI(){
+  if (!currentModel) return;
+  posEls[0].value = currentModel.position.x.toFixed(2);
+  posEls[1].value = currentModel.position.y.toFixed(2);
+  posEls[2].value = currentModel.position.z.toFixed(2);
+  rotEls[0].value = THREE.MathUtils.radToDeg(currentModel.rotation.x).toFixed(0);
+  rotEls[1].value = THREE.MathUtils.radToDeg(currentModel.rotation.y).toFixed(0);
+  rotEls[2].value = THREE.MathUtils.radToDeg(currentModel.rotation.z).toFixed(0);
+  scaEls[0].value = currentModel.scale.x.toFixed(2);
+  scaEls[1].value = currentModel.scale.y.toFixed(2);
+  scaEls[2].value = currentModel.scale.z.toFixed(2);
+}
+function applyTransformFromUI(){
+  if (!currentModel) return;
+  currentModel.position.set(parseFloat(posEls[0].value)||0, parseFloat(posEls[1].value)||0, parseFloat(posEls[2].value)||0);
+  currentModel.rotation.set(
+    THREE.MathUtils.degToRad(parseFloat(rotEls[0].value)||0),
+    THREE.MathUtils.degToRad(parseFloat(rotEls[1].value)||0),
+    THREE.MathUtils.degToRad(parseFloat(rotEls[2].value)||0)
+  );
+  currentModel.scale.set(parseFloat(scaEls[0].value)||1, parseFloat(scaEls[1].value)||1, parseFloat(scaEls[2].value)||1);
+}
+[...posEls, ...rotEls, ...scaEls].forEach(el=>el.addEventListener('input', ()=>{
+  if (!currentModel){ toast('Import a model first.', true); return; }
+  applyTransformFromUI();
+}));
+document.getElementById('uniScale').addEventListener('input', e=>{
+  document.getElementById('uniScaleVal').textContent = parseFloat(e.target.value).toFixed(2);
+  if (!currentModel) return;
+  const v = parseFloat(e.target.value);
+  scaEls.forEach(el=>el.value = v.toFixed(2));
+  applyTransformFromUI();
+});
+document.getElementById('btnResetTransform').addEventListener('click', ()=>{
+  if (!currentModel){ toast('No model to reset.', true); return; }
+  currentModel.position.set(0,0,0); currentModel.rotation.set(0,0,0); currentModel.scale.set(1,1,1);
+  frameModel(currentModel);
+  document.getElementById('uniScale').value = 1;
+  document.getElementById('uniScaleVal').textContent = '1.00';
+});
+
+/* ---------------- Camera panel ---------------- */
+const camPresetsPos = {
+  front:[0,1,4.2], back:[0,1,-4.2], left:[-4.2,1,0], right:[4.2,1,0],
+  top:[0,4.5,0.01], bottom:[0,-4.5,0.01], iso:[3,2.4,4.2], showcase:[3.6,1.6,3.6],
+  closeup:[1.6,1.1,2.0], portrait:[0.4,1.4,3.4]
+};
+document.getElementById('camPresets').addEventListener('click', e=>{
+  const btn = e.target.closest('.preset-btn'); if (!btn) return;
+  document.querySelectorAll('#camPresets .preset-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  const p = camPresetsPos[btn.dataset.cam];
+  const t = controls.target.clone();
+  camera.position.set(p[0]+t.x, p[1], p[2]+t.z);
+  controls.update();
+});
+document.getElementById('fov').addEventListener('input', e=>{
+  camera.fov = parseFloat(e.target.value);
+  camera.updateProjectionMatrix();
+  document.getElementById('fovVal').textContent = e.target.value + '°';
+});
+document.getElementById('btnResetCam').addEventListener('click', ()=>{
+  camera.fov = 45; camera.updateProjectionMatrix();
+  document.getElementById('fov').value = 45; document.getElementById('fovVal').textContent = '45°';
+  if (currentModel) focusCamera(); else { camera.position.set(3,2.4,4.2); controls.target.set(0,0.8,0); controls.update(); }
+});
+
+/* ---------------- Background panel ---------------- */
+const bgPresets = {
+  Dark:'#101114', Light:'#e7e6e2', Studio:'#2b2c33', Blue:'#16324a',
+  Purple:'#2c1f45', Sunset:'#5b3220', Neutral:'#3a3b42', 'Checker':'checker'
+};
+const swGrid = document.getElementById('bgPresetSwatches');
+Object.entries(bgPresets).forEach(([name,val])=>{
+  const sw = document.createElement('div');
+  sw.className='swatch'; sw.title=name;
+  sw.style.background = val==='checker' ? 'repeating-conic-gradient(#555 0 25%, #333 0 50%) 0 0/12px 12px' : val;
+  sw.addEventListener('click', ()=>{
+    document.querySelectorAll('.swatch').forEach(s=>s.classList.remove('active'));
+    sw.classList.add('active');
+    if (val === 'checker'){ scene.background = null; renderer.setClearColor(0x000000,0); wrap.style.background='repeating-conic-gradient(#3a3a3a 0 25%, #222 0 50%) 0 0/24px 24px'; }
+    else { wrap.style.background=''; scene.background = new THREE.Color(val); }
+  });
+  swGrid.appendChild(sw);
+});
+document.getElementById('bgColor').addEventListener('input', e=>{
+  wrap.style.background=''; scene.background = new THREE.Color(e.target.value);
+  document.querySelectorAll('.swatch').forEach(s=>s.classList.remove('active'));
+});
+function applyGradient(){
+  const top = document.getElementById('bgGradTop').value;
+  const bottom = document.getElementById('bgGradBottom').value;
+  const c = document.createElement('canvas'); c.width=2; c.height=256;
+  const ctx = c.getContext('2d');
+  const grad = ctx.createLinearGradient(0,0,0,256);
+  grad.addColorStop(0, top); grad.addColorStop(1, bottom);
+  ctx.fillStyle = grad; ctx.fillRect(0,0,2,256);
+  const tex = new THREE.CanvasTexture(c);
+  scene.background = tex;
+}
+document.getElementById('bgGradTop').addEventListener('input', applyGradient);
+document.getElementById('bgGradBottom').addEventListener('input', applyGradient);
+document.getElementById('btnBgImage').addEventListener('click', ()=>document.getElementById('bgImageInput').click());
+document.getElementById('bgImageInput').addEventListener('change', e=>{
+  const f = e.target.files[0]; if (!f) return;
+  const url = URL.createObjectURL(f);
+  new THREE.TextureLoader().load(url, tex=>{
+    tex.encoding = THREE.sRGBEncoding;
+    scene.background = tex;
+    URL.revokeObjectURL(url);
+  }, undefined, ()=>toast('Unable to load this image.', true));
+});
+
+/* ---------------- Environment panel ---------------- */
+const envPresets = {
+  studio:{hemi:0xffffff,ground:0x2a2a2e,int:1.1}, soft:{hemi:0xfff6ea,ground:0x2a2a2e,int:0.7},
+  day:{hemi:0xbfe3ff,ground:0x4a4a3f,int:1.3}, sunset:{hemi:0xffb877,ground:0x2a1f2e,int:1.0},
+  night:{hemi:0x33415e,ground:0x0a0a12,int:0.35}, dramatic:{hemi:0x555566,ground:0x000000,int:0.4},
+  outdoor:{hemi:0xcfe8ff,ground:0x5a4a34,int:1.4}, neutral:{hemi:0xffffff,ground:0x444444,int:1.0}
+};
+document.getElementById('envPresets').addEventListener('click', e=>{
+  const btn = e.target.closest('.preset-btn'); if (!btn) return;
+  document.querySelectorAll('#envPresets .preset-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  const p = envPresets[btn.dataset.env];
+  hemi.color.setHex(p.hemi); hemi.groundColor.setHex(p.ground);
+  hemi.intensity = p.int * parseFloat(document.getElementById('envInt').value);
+});
+document.getElementById('envInt').addEventListener('input', e=>{
+  document.getElementById('envIntVal').textContent = parseFloat(e.target.value).toFixed(2);
+  const active = document.querySelector('#envPresets .preset-btn.active');
+  const p = envPresets[active ? active.dataset.env : 'studio'];
+  hemi.intensity = p.int * parseFloat(e.target.value);
+});
+document.getElementById('envRot').addEventListener('input', e=>{
+  document.getElementById('envRotVal').textContent = e.target.value + '°';
+  rootGroup.rotation.y = THREE.MathUtils.degToRad(parseFloat(e.target.value));
+});
+document.getElementById('envToggle').addEventListener('click', function(){
+  this.classList.toggle('on');
+  hemi.visible = this.classList.contains('on');
+});
+
+/* ---------------- Lighting panel ---------------- */
+const lightPresets = {
+  studio:{int:1.2,shadow:0.28}, soft:{int:0.7,shadow:0.15}, dramatic:{int:2.2,shadow:0.5},
+  bright:{int:2.0,shadow:0.2}, neutral:{int:1.0,shadow:0.25}
+};
+document.getElementById('lightPresets').addEventListener('click', e=>{
+  const btn = e.target.closest('.preset-btn'); if (!btn) return;
+  document.querySelectorAll('#lightPresets .preset-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  const p = lightPresets[btn.dataset.light];
+  key.intensity = p.int; groundMat.opacity = p.shadow;
+  document.getElementById('mainInt').value = p.int;
+  document.getElementById('mainIntVal').textContent = p.int.toFixed(2);
+});
+document.getElementById('mainInt').addEventListener('input', e=>{
+  key.intensity = parseFloat(e.target.value);
+  document.getElementById('mainIntVal').textContent = parseFloat(e.target.value).toFixed(2);
+});
+document.getElementById('mainRot').addEventListener('input', e=>{
+  const deg = parseFloat(e.target.value);
+  document.getElementById('mainRotVal').textContent = deg + '°';
+  const rad = THREE.MathUtils.degToRad(deg);
+  key.position.set(Math.cos(rad)*5, 4, Math.sin(rad)*5);
+});
+key.position.set(Math.cos(THREE.MathUtils.degToRad(45))*5, 4, Math.sin(THREE.MathUtils.degToRad(45))*5);
+document.getElementById('shadowToggle').addEventListener('click', function(){
+  this.classList.toggle('on');
+  const on = this.classList.contains('on');
+  key.castShadow = on; renderer.shadowMap.enabled = on; ground.visible = on;
+});
+document.getElementById('groundToggle').addEventListener('click', function(){
+  this.classList.toggle('on');
+  grid.visible = this.classList.contains('on');
+});
+
+/* ---------------- Templates ---------------- */
+document.getElementById('templatePresets').addEventListener('click', e=>{
+  const btn = e.target.closest('.preset-btn'); if (!btn) return;
+  document.querySelectorAll('#templatePresets .preset-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  const clickCam = (name)=>document.querySelector('#camPresets [data-cam="'+name+'"]').click();
+  const clickEnv = (name)=>document.querySelector('#envPresets [data-env="'+name+'"]').click();
+  if (btn.dataset.tpl==='item'){ clickCam('iso'); scene.background = new THREE.Color('#3a3b42'); clickEnv('soft'); }
+  if (btn.dataset.tpl==='skin'){ clickCam('front'); scene.background = new THREE.Color('#101114'); clickEnv('neutral'); }
+  if (btn.dataset.tpl==='showcase'){ clickCam('showcase'); clickEnv('dramatic'); }
+  if (btn.dataset.tpl==='product'){ clickCam('front'); scene.background = new THREE.Color('#e7e6e2'); clickEnv('studio'); }
+  toast('Preset applied: ' + btn.textContent);
+});
+
+/* ---------------- HUD ---------------- */
+document.getElementById('hudFocus').addEventListener('click', ()=>{
+  if (!currentModel){ toast('Import a model first.', true); return; }
+  frameModel(currentModel);
+});
+document.getElementById('hudGrid').addEventListener('click', ()=>{ grid.visible = !grid.visible; });
+
+/* ---------------- Reset all ---------------- */
+document.getElementById('btnResetAll').addEventListener('click', ()=>{
+  clearModel();
+  setEmptyState(false);
+  document.getElementById('fname').textContent = 'No model loaded';
+  ['infoName','infoFormat','infoVerts','infoTris','infoMats','infoTex','infoAnim'].forEach(id=>document.getElementById(id).textContent='—');
+  camera.position.set(3,2.4,4.2); controls.target.set(0,0.8,0); controls.update();
+  toast('Scene reset.');
+});
+
+/* ---------------- Screenshot ---------------- */
+let selectedRes = [1024,1024];
+document.getElementById('resGrid').addEventListener('click', e=>{
+  const btn = e.target.closest('.preset-btn'); if (!btn) return;
+  document.querySelectorAll('#resGrid .preset-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  const cr = document.getElementById('customRes');
+  if (btn.dataset.res === 'custom'){ cr.classList.add('show'); }
+  else { cr.classList.remove('show'); const [w,h]=btn.dataset.res.split(',').map(Number); selectedRes=[w,h]; }
+});
+['customW','customH'].forEach(id=>document.getElementById(id).addEventListener('input', ()=>{
+  selectedRes = [parseInt(document.getElementById('customW').value)||1024, parseInt(document.getElementById('customH').value)||1024];
+}));
+document.getElementById('transToggle').addEventListener('click', function(){ this.classList.toggle('on'); });
+
+function captureScreenshot(){
+  if (!currentModel){ toast('Import a model before taking a screenshot.', true); return; }
+  const [w,h] = selectedRes;
+  const transparent = document.getElementById('transToggle').classList.contains('on');
+  const format = document.getElementById('shotFormat').value;
+
+  const prevW = renderer.domElement.width, prevH = renderer.domElement.height;
+  const prevAspect = camera.aspect;
+  const prevAlpha = renderer.getClearAlpha();
+
+  renderer.setPixelRatio(1);
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  if (transparent){ renderer.setClearAlpha(0); }
+  renderer.render(scene, camera);
+
+  const mime = format==='png' ? 'image/png' : format==='jpeg' ? 'image/jpeg' : 'image/webp';
+  const dataUrl = renderer.domElement.toDataURL(mime, 0.95);
+
+  // restore
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
+  renderer.setSize(wrap.clientWidth, wrap.clientHeight, false);
+  camera.aspect = prevAspect;
+  camera.updateProjectionMatrix();
+  renderer.setClearAlpha(prevAlpha);
+
+  document.getElementById('shotImg').src = dataUrl;
+  document.getElementById('shotRes').textContent = w + '×' + h;
+  document.getElementById('shotFmt').textContent = format.toUpperCase();
+  document.getElementById('screenshotPreview').classList.add('show');
+  document.getElementById('screenshotPreview').dataset.url = dataUrl;
+  document.getElementById('screenshotPreview').dataset.format = format;
+  document.getElementById('right').querySelector('[data-s="shot"]').classList.add('open');
+  toast('Screenshot captured at ' + w + '×' + h + '.');
+}
+document.getElementById('btnShot').addEventListener('click', captureScreenshot);
+document.getElementById('btnCapture').addEventListener('click', captureScreenshot);
+document.getElementById('btnRetake').addEventListener('click', ()=>{
+  document.getElementById('screenshotPreview').classList.remove('show');
+});
+document.getElementById('btnDownload').addEventListener('click', ()=>{
+  const pane = document.getElementById('screenshotPreview');
+  const a = document.createElement('a');
+  a.href = pane.dataset.url;
+  a.download = 'model-screenshot.' + (pane.dataset.format==='jpeg'?'jpg':pane.dataset.format);
+  document.body.appendChild(a); a.click(); a.remove();
+});
+
+/* keep initial state consistent */
+scene.background = new THREE.Color('#101114');
+document.querySelector('#bgPresetSwatches .swatch').classList.add('active');
+setEmptyState(false);
+
+} catch (err) {
+  console.error('Forge init error:', err);
+  const banner = document.getElementById('initError');
+  document.getElementById('initErrorDetail').textContent = (err && err.message) ? err.message : String(err);
+  banner.classList.add('show');
+  document.getElementById('empty-state').classList.add('hidden');
+  ['btnShot','btnCapture'].forEach(id=>{ const b=document.getElementById(id); if (b) b.disabled = true; });
+}
+
+})();
+</script>
+</body>
+</html>
