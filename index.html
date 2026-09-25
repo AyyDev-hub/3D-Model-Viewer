@@ -1300,7 +1300,7 @@ document.getElementById('resGrid').addEventListener('click', e=>{
 document.getElementById('transToggle').addEventListener('click', function(){ this.classList.toggle('on'); });
 
 function captureScreenshot(){
-  if (!currentModel){ toast('Import a model before taking a screenshot.', true); return; }
+  if (!currentModel){ toast('Import the model before rendering the image.', true); return; }
   const [w,h] = selectedRes;
   const transparent = document.getElementById('transToggle').classList.contains('on');
   const format = document.getElementById('shotFormat').value;
