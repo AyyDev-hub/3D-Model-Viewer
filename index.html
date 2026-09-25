@@ -197,21 +197,71 @@ select{
 #shotMeta{padding:8px 10px;font-size:11px;color:var(--text-dim);display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;}
 .shot-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:0 10px 10px;}
 
-@media (max-width:900px){
-  .sidebar{width:210px;}
+/* ---------- Mobile drawer toggles & backdrop (hidden on desktop) ---------- */
+#drawerToggleLeft,#drawerToggleRight{display:none;}
+#drawerBackdrop{
+  display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:35;
+}
+#drawerBackdrop.show{display:block;}
+
+@media (max-width:860px){
+  html,body{height:100%;}
+  #topbar{padding-left:calc(14px + env(safe-area-inset-left,0px));padding-right:calc(14px + env(safe-area-inset-right,0px));gap:8px;}
+  #topbar .brand{font-size:14px;}
   #topbar .fname{display:none;}
+  #drawerToggleLeft,#drawerToggleRight{
+    display:flex; align-items:center; justify-content:center; width:34px; height:34px; flex:0 0 auto;
+    background:var(--panel-2); border:1px solid var(--border); border-radius:6px; color:var(--text); cursor:pointer;
+  }
+  #drawerToggleLeft svg,#drawerToggleRight svg{width:17px;height:17px;}
+  #main{position:relative; overflow:hidden;}
+  .sidebar{
+    position:fixed; top:calc(48px + env(safe-area-inset-top,0px)); bottom:0; z-index:40;
+    width:min(82vw,320px); transition:transform .22s ease; box-shadow:0 0 30px rgba(0,0,0,.5);
+  }
+  #left{left:0; transform:translateX(-100%); padding-left:env(safe-area-inset-left,0px); border-right:1px solid var(--border);}
+  #left.open-mobile{transform:translateX(0);}
+  #right{right:0; left:auto; transform:translateX(100%); padding-right:env(safe-area-inset-right,0px); border-left:1px solid var(--border);}
+  #right.open-mobile{transform:translateX(0);}
+  #viewport-wrap{width:100%;}
+  #vp-hud{left:calc(14px + env(safe-area-inset-left,0px)); bottom:calc(14px + env(safe-area-inset-bottom,0px));}
+  #anim-bar{bottom:calc(14px + env(safe-area-inset-bottom,0px)); max-width:92vw;}
+  #anim-bar select{width:110px;}
+  #toast{top:calc(58px + env(safe-area-inset-top,0px)); max-width:88vw;}
+}
+
+/* Landscape phones: shorter topbar, narrower drawers so viewport stays usable */
+@media (max-width:900px) and (max-height:480px) and (orientation:landscape){
+  #topbar{height:42px;}
+  .sidebar{top:calc(42px + env(safe-area-inset-top,0px)); width:min(60vw,280px);}
+  .section-body{padding-bottom:8px;}
+  #dropzone{padding:14px 10px;}
+}
+
+/* Touch devices: bigger hit targets */
+@media (pointer:coarse){
+  .btn{padding:9px 13px;}
+  .preset-btn{padding:9px 6px;}
+  .switch{width:38px;height:22px;}
+  .switch .knob{width:18px;height:18px;}
+  .switch.on .knob{left:17px;}
+  input[type=range]::-webkit-slider-thumb{width:18px;height:18px;}
+  .tab{padding:9px;}
 }
 </style>
 </head>
 <body>
 
 <div id="topbar">
+  <div id="drawerToggleLeft" title="Tools"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h16"/></svg></div>
   <div class="brand"><span class="dot"></span>Forge</div>
   <div class="fname" id="fname">No model loaded</div>
   <div class="spacer"></div>
   <button class="btn" id="btnResetAll" title="Reset scene to defaults">Reset</button>
-  <button class="btn primary" id="btnShot">Screenshot</button>
+  <button class="btn primary" id="btnShot">Render</button>
+  <div id="drawerToggleRight" title="Properties"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M4 12h4M16 12h4M12 4v4M12 16v4"/></svg></div>
 </div>
+<div id="drawerBackdrop"></div>
 
 <div id="main">
   <!-- LEFT SIDEBAR -->
@@ -387,7 +437,7 @@ select{
   <!-- RIGHT SIDEBAR -->
   <div class="sidebar" id="right">
     <div class="section open" data-s="shot">
-      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3.5"/><path d="M8 6l1.5-2h5L16 6"/></svg>Screenshot<span class="chev">▸</span></div>
+      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3.5"/><path d="M8 6l1.5-2h5L16 6"/></svg>Render<span class="chev">▸</span></div>
       <div class="section-body">
         <label class="field"><div class="lbl">Resolution</div></label>
         <div class="res-grid" id="resGrid">
@@ -408,7 +458,7 @@ select{
         </label>
         <label class="field"><div class="lbl">Transparent background</div></label>
         <div class="toggle-row" style="margin-top:2px;"><span class="lbl">Transparent PNG</span><div class="switch" id="transToggle"><div class="knob"></div></div></div>
-        <button class="btn primary mini" id="btnCapture">Capture Screenshot</button>
+        <button class="btn primary mini" id="btnCapture">Render</button>
 
         <div id="screenshotPreview">
           <img id="shotImg" alt="Screenshot preview">
@@ -461,6 +511,27 @@ function toast(msg, isErr){
 }
 
 /* ---------------- UI bindings that must work even if the 3D engine fails ---------------- */
+const leftDrawer = document.getElementById('left');
+const rightDrawer = document.getElementById('right');
+const backdrop = document.getElementById('drawerBackdrop');
+function closeDrawers(){
+  leftDrawer.classList.remove('open-mobile');
+  rightDrawer.classList.remove('open-mobile');
+  backdrop.classList.remove('show');
+}
+function openDrawer(which){
+  const isOpen = which.classList.contains('open-mobile');
+  closeDrawers();
+  if (!isOpen){ which.classList.add('open-mobile'); backdrop.classList.add('show'); }
+}
+document.getElementById('drawerToggleLeft').addEventListener('click', ()=>openDrawer(leftDrawer));
+document.getElementById('drawerToggleRight').addEventListener('click', ()=>openDrawer(rightDrawer));
+backdrop.addEventListener('click', closeDrawers);
+window.addEventListener('resize', ()=>{ if (window.innerWidth > 860) closeDrawers(); });
+if (screen.orientation && screen.orientation.addEventListener){
+  screen.orientation.addEventListener('change', closeDrawers);
+}
+
 document.querySelectorAll('.section-head').forEach(h=>{
   h.addEventListener('click', ()=>{ h.parentElement.classList.toggle('open'); });
 });
