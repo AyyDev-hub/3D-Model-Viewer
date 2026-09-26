@@ -127,6 +127,34 @@ select{
 .mat-row .mat-val{width:34px;flex:0 0 auto;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--text-dim);}
 .mat-section-title{color:var(--text-faint);font-size:10px;text-transform:uppercase;letter-spacing:.5px;margin-top:14px;margin-bottom:2px;}
 
+/* ---------- Help buttons & modal (intro + per-feature tutorials) ---------- */
+.help-btn{
+  width:17px;height:17px;border-radius:50%;flex:0 0 auto;margin-left:6px;
+  background:var(--panel-2);border:1px solid var(--border);color:var(--text-dim);
+  font-size:10px;font-weight:700;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;
+}
+.help-btn:hover{color:var(--accent);border-color:var(--accent-dim);}
+.modal-overlay{
+  position:fixed;inset:0;background:rgba(6,6,8,.72);backdrop-filter:blur(3px);z-index:200;
+  display:none;align-items:center;justify-content:center;padding:20px;
+  padding-top:calc(20px + env(safe-area-inset-top,0px));padding-bottom:calc(20px + env(safe-area-inset-bottom,0px));
+}
+.modal-overlay.show{display:flex;}
+.modal-box{
+  background:var(--panel);border:1px solid var(--border);border-radius:10px;max-width:520px;width:100%;
+  max-height:82vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.5);
+}
+.modal-head{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--border);flex:0 0 auto;}
+.modal-head h3{margin:0;font-family:'Space Grotesk',sans-serif;font-size:16px;font-weight:600;flex:1;}
+.modal-close{width:26px;height:26px;border-radius:6px;background:var(--panel-2);border:1px solid var(--border);color:var(--text-dim);cursor:pointer;font-size:13px;flex:0 0 auto;}
+.modal-close:hover{color:var(--text);}
+.modal-body{padding:16px 18px;overflow-y:auto;font-size:12.5px;line-height:1.7;color:var(--text-dim);}
+.modal-body b{color:var(--text);}
+.modal-body ul{margin:6px 0;padding-left:18px;}
+.modal-body li{margin:4px 0;}
+.modal-body .accent{color:var(--accent);}
+.modal-foot{padding:12px 18px;border-top:1px solid var(--border);flex:0 0 auto;display:flex;justify-content:flex-end;}
+
 /* import zone */
 #dropzone{
   border:1.5px dashed var(--border); border-radius:8px; padding:22px 10px; text-align:center;
@@ -281,7 +309,7 @@ select{
   <div class="sidebar" id="left">
 
     <div class="section open" data-s="import">
-      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>Import Model<span class="chev">▸</span></div>
+      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>Import Model<span class="help-btn" data-help="import" title="Bantuan">?</span><span class="chev">▸</span></div>
       <div class="section-body">
         <div id="dropzone">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
@@ -329,7 +357,7 @@ select{
     </div>
 
     <div class="section" data-s="material">
-      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 000 18 4.5 4.5 0 010-9 3 3 0 003-3 4.5 4.5 0 01-3-6z"/></svg>Material<span class="chev">▸</span></div>
+      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 000 18 4.5 4.5 0 010-9 3 3 0 003-3 4.5 4.5 0 01-3-6z"/></svg>Material<span class="help-btn" data-help="material" title="Bantuan">?</span><span class="chev">▸</span></div>
       <div class="section-body">
         <label class="field"><div class="lbl">Mesh</div><select id="matMeshSelect"><option>No model loaded</option></select></label>
         <div id="materialControls"></div>
@@ -340,7 +368,7 @@ select{
     </div>
 
     <div class="section" data-s="camera">
-      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3"/></svg>Camera<span class="chev">▸</span></div>
+      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3"/></svg>Camera<span class="help-btn" data-help="camera" title="Bantuan">?</span><span class="chev">▸</span></div>
       <div class="section-body">
         <div class="presetgrid" id="camPresets">
           <div class="preset-btn" data-cam="front">Front</div>
@@ -360,7 +388,7 @@ select{
     </div>
 
     <div class="section" data-s="background">
-      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.6"/><path d="M21 15l-5-5L5 21"/></svg>Background<span class="chev">▸</span></div>
+      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.6"/><path d="M21 15l-5-5L5 21"/></svg>Background<span class="help-btn" data-help="background" title="Bantuan">?</span><span class="chev">▸</span></div>
       <div class="section-body">
         <div class="tabs" id="bgTabs">
           <div class="tab active" data-bg="solid">Solid</div>
@@ -383,7 +411,7 @@ select{
     </div>
 
     <div class="section" data-s="environment">
-      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a13 13 0 010 18 13 13 0 010-18z"/></svg>Environment<span class="chev">▸</span></div>
+      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a13 13 0 010 18 13 13 0 010-18z"/></svg>Environment<span class="help-btn" data-help="environment" title="Bantuan">?</span><span class="chev">▸</span></div>
       <div class="section-body">
         <div class="presetgrid" id="envPresets">
           <div class="preset-btn active" data-env="studio">Studio</div>
@@ -402,7 +430,7 @@ select{
     </div>
 
     <div class="section" data-s="lighting">
-      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 18h6M10 21h4M12 3a6 6 0 00-3.5 10.9c.5.4.8.9.8 1.5v.1h5.4v-.1c0-.6.3-1.1.8-1.5A6 6 0 0012 3z"/></svg>Lighting<span class="chev">▸</span></div>
+      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 18h6M10 21h4M12 3a6 6 0 00-3.5 10.9c.5.4.8.9.8 1.5v.1h5.4v-.1c0-.6.3-1.1.8-1.5A6 6 0 0012 3z"/></svg>Lighting<span class="help-btn" data-help="lighting" title="Bantuan">?</span><span class="chev">▸</span></div>
       <div class="section-body">
         <div class="presetgrid" id="lightPresets">
           <div class="preset-btn active" data-light="studio">Studio</div>
@@ -419,7 +447,7 @@ select{
     </div>
 
     <div class="section" data-s="presets">
-      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 2l3 7h7l-5.5 4.5L18.5 21 12 16.5 5.5 21l2-7.5L2 9h7z"/></svg>Presets<span class="chev">▸</span></div>
+      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 2l3 7h7l-5.5 4.5L18.5 21 12 16.5 5.5 21l2-7.5L2 9h7z"/></svg>Presets<span class="help-btn" data-help="presets" title="Bantuan">?</span><span class="chev">▸</span></div>
       <div class="section-body">
         <div class="presetgrid" id="templatePresets">
           <div class="preset-btn" data-tpl="item">Item Preview</div>
@@ -461,7 +489,7 @@ select{
   <!-- RIGHT SIDEBAR -->
   <div class="sidebar" id="right">
     <div class="section open" data-s="shot">
-      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3.5"/><path d="M8 6l1.5-2h5L16 6"/></svg>Render<span class="chev">▸</span></div>
+      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3.5"/><path d="M8 6l1.5-2h5L16 6"/></svg>Render<span class="help-btn" data-help="render" title="Bantuan">?</span><span class="chev">▸</span></div>
       <div class="section-body">
         <label class="field"><div class="lbl">Resolution</div></label>
         <div class="res-grid" id="resGrid">
@@ -511,6 +539,13 @@ select{
 </div>
 
 <div id="toast"></div>
+<div id="genericModal" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-head"><h3 id="modalTitle">Judul</h3><button class="modal-close" id="modalCloseBtn">✕</button></div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-foot"><button class="btn primary" id="modalOkBtn">Mengerti</button></div>
+  </div>
+</div>
 
 <!-- three.js r128 UMD build + classic (non-module) example loaders/controls -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
@@ -539,6 +574,112 @@ function toast(msg, isErr){
 }
 
 /* ---------------- UI bindings that must work even if the 3D engine fails ---------------- */
+
+/* ---------------- Help system (intro popup + per-feature "?" tutorials) ---------------- */
+const HELP_TOPICS = {
+  intro: {
+    title: '👋 Selamat datang di Forge',
+    body: `<p><b>Forge</b> adalah studio 3D berbasis web untuk membuat <b>ikon item, preview skin, thumbnail, dan render</b> dari model 3D atau scene <b>Godot Engine</b> — semua diproses langsung di browser Anda, tanpa upload ke server.</p>
+    <p><b>Alur dasar:</b></p>
+    <ul>
+      <li>1️⃣ <b>Import</b> model (GLB/GLTF/OBJ/STL) atau scene Godot (.tscn)</li>
+      <li>2️⃣ <b>Atur</b> kamera, background, lighting, environment, dan material</li>
+      <li>3️⃣ Pilih <b>Template</b> siap pakai bila ingin cepat</li>
+      <li>4️⃣ Tekan <b>Render</b>, pilih resolusi, lalu <b>Download</b></li>
+    </ul>
+    <p>Setiap panel punya tombol <span class="accent">(?)</span> kecil di sebelah judulnya — klik kapan saja kalau butuh penjelasan fitur itu.</p>`
+  },
+  import: {
+    title: '📥 Import Model & Godot Scene',
+    body: `<p><b>Model biasa:</b> GLB, GLTF, OBJ, STL bisa langsung di-drag & drop atau dipilih lewat tombol.</p>
+    <p><b>OBJ dengan material / GLB dengan tekstur terpisah:</b> pilih <b>beberapa file sekaligus</b> (model + .mtl atau model + gambar tekstur) — akan dicocokkan otomatis berdasarkan nama file.</p>
+    <p><b>Scene Godot (.tscn) — format folder yang WAJIB:</b></p>
+    <ul>
+      <li>Karena <code>.tscn</code> hanya berisi teks & path <code>res://...</code>, Anda harus upload <b>seluruh folder project</b> (atau <b>.zip</b>-nya) — bukan cuma file .tscn sendirian.</li>
+      <li>Pastikan semua aset visual yang direferensikan (model .glb/.gltf, gambar tekstur .png/.jpg) ikut ter-include di dalam folder/zip tersebut, dengan struktur folder yang sama seperti project aslinya.</li>
+      <li>Hanya node visual (<code>MeshInstance3D</code>) yang diimpor — collision, physics body, kamera, dan cahaya dari Godot otomatis di-skip.</li>
+    </ul>
+    <p class="accent">Tips: kalau tekstur tidak muncul setelah import, cek kotak log kecil di bawah tombol upload — biasanya menunjukkan file mana yang tidak ketemu.</p>`
+  },
+  material: {
+    title: '🎨 Panel Material',
+    body: `<p>Edit material tiap mesh secara lengkap: <b>Base Color, Metalness, Roughness, Normal Map, Emissive, Ambient Occlusion, Opacity, Wireframe</b>, dan <b>Double-sided</b>.</p>
+    <ul>
+      <li>Kalau model punya beberapa bagian/mesh, pilih dulu lewat dropdown <b>Mesh</b> di atas.</li>
+      <li>Klik thumbnail atau tombol di tiap slot tekstur untuk <b>attach gambar sendiri</b> — berguna kalau model tidak bertekstur sama sekali.</li>
+      <li>Tombol <b>✕</b> di sebelah slot untuk hapus tekstur; tombol <b>Reset Material</b> mengembalikan ke kondisi awal saat model di-import.</li>
+    </ul>`
+  },
+  camera: {
+    title: '🎥 Panel Camera',
+    body: `<p>Pilih salah satu <b>preset</b> (Front, Isometric, Showcase, Close-up, dsb.) sebagai titik awal, lalu atur manual lewat orbit di viewport (drag = putar, scroll = zoom, drag kanan = geser).</p>
+    <p>Slider <b>Field of View</b> mengubah "lebar lensa" — nilai kecil untuk tampilan telephoto/flat, nilai besar untuk efek wide-angle.</p>`
+  },
+  background: {
+    title: '🖼️ Panel Background',
+    body: `<p>Background hanya memengaruhi <b>tampilan visual</b> di belakang model, <b>tidak</b> memengaruhi pencahayaan (itu urusan panel Environment).</p>
+    <ul>
+      <li><b>Solid</b>: pilih warna preset atau color picker bebas.</li>
+      <li><b>Gradient</b>: dua warna, atas & bawah.</li>
+      <li><b>Image</b>: upload gambar sendiri sebagai latar.</li>
+    </ul>`
+  },
+  environment: {
+    title: '🌤️ Panel Environment',
+    body: `<p>Environment mengatur <b>mood pencahayaan ambient</b> (bukan tampilan background) — preset seperti Studio, Sunset, Dramatic, Night akan mengubah warna & intensitas cahaya sekitar model.</p>
+    <p>Slider <b>Rotation</b> memutar arah pencahayaan mengelilingi model; <b>Intensity</b> mengatur seberapa terang efeknya.</p>`
+  },
+  lighting: {
+    title: '💡 Panel Lighting',
+    body: `<p>Mengatur <b>lampu utama (key light)</b> — intensitas dan sudutnya — terpisah dari Environment. Preset di atas untuk mempercepat (Soft, Dramatic, Bright, dst).</p>
+    <p>Toggle <b>Shadows</b> dan <b>Ground plane</b> bisa dimatikan kalau ingin tampilan lebih minimal atau performa lebih ringan di perangkat lemah.</p>`
+  },
+  presets: {
+    title: '⭐ Template Siap Pakai',
+    body: `<p>Satu klik langsung mengatur kombinasi <b>Camera + Background + Environment</b> sekaligus, sesuai kebutuhan umum:</p>
+    <ul>
+      <li><b>Item Preview</b> — cocok untuk ikon item game</li>
+      <li><b>Skin Preview</b> — tampak depan, netral</li>
+      <li><b>Showcase</b> — dramatis untuk promosi</li>
+      <li><b>Product</b> — terang & bersih ala studio produk</li>
+    </ul>
+    <p>Setelah pilih template, semua parameter tetap bisa diubah manual lagi.</p>`
+  },
+  render: {
+    title: '📸 Render & Export',
+    body: `<p>Pilih <b>resolusi</b> (preset atau custom width/height), <b>format</b> (PNG/JPG/WebP), dan aktifkan <b>Transparent PNG</b> kalau ingin latar transparan (bagus untuk ikon item).</p>
+    <p>Hasil render diambil dari render target sungguhan sesuai resolusi pilihan — bukan sekadar screenshot layar yang diperbesar — jadi kualitasnya tetap tajam di ukuran berapa pun.</p>
+    <p>Setelah preview muncul, tombol <b>Download</b> untuk simpan, atau <b>Retake</b> untuk mengambil ulang.</p>`
+  }
+};
+
+function openModal(topicKey){
+  const topic = HELP_TOPICS[topicKey];
+  if (!topic) return;
+  document.getElementById('modalTitle').textContent = topic.title;
+  document.getElementById('modalBody').innerHTML = topic.body;
+  document.getElementById('genericModal').classList.add('show');
+}
+function closeModal(){ document.getElementById('genericModal').classList.remove('show'); }
+document.getElementById('modalCloseBtn').addEventListener('click', closeModal);
+document.getElementById('modalOkBtn').addEventListener('click', closeModal);
+document.getElementById('genericModal').addEventListener('click', e=>{ if (e.target.id === 'genericModal') closeModal(); });
+
+document.addEventListener('click', e=>{
+  const btn = e.target.closest('.help-btn');
+  if (!btn) return;
+  e.stopPropagation(); // capture phase: stops this from also toggling the accordion section
+  openModal(btn.dataset.help);
+}, true);
+
+// Show the intro tutorial once per browser session.
+try {
+  if (!sessionStorage.getItem('forge_intro_shown')){
+    openModal('intro');
+    sessionStorage.setItem('forge_intro_shown', '1');
+  }
+} catch(e){ openModal('intro'); } // storage unavailable — show anyway rather than skip silently
+
 const leftDrawer = document.getElementById('left');
 const rightDrawer = document.getElementById('right');
 const backdrop = document.getElementById('drawerBackdrop');
@@ -661,6 +802,16 @@ function animate(){
 }
 const clock = new THREE.Clock();
 animate();
+
+/* Fallback render path: some hosting/iframe contexts throttle or fully pause
+   requestAnimationFrame when this frame is considered inactive (scrolled out of view,
+   unfocused, backgrounded), which otherwise leaves the viewport visually frozen until
+   something else forces a redraw. A lightweight interval keeps the picture fresh
+   regardless of rAF state, and any interaction repaints instantly rather than waiting. */
+setInterval(()=>{ try{ controls.update(); renderer.render(scene, camera); }catch(e){} }, 400);
+['pointerdown','wheel','touchstart','scroll','focus'].forEach(evt=>{
+  window.addEventListener(evt, ()=>{ try{ renderer.render(scene, camera); }catch(e){} }, {passive:true});
+});
 
 /* ---------------- Model state ---------------- */
 let currentModel = null, clips = [], activeAction = null;
