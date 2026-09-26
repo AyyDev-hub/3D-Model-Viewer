@@ -121,6 +121,7 @@ select{
 .mat-row .mat-ctrl{flex:1;min-width:0;}
 .mat-row input[type=range]{margin:0;}
 .mat-row .mat-tex-btn{flex:1;background:var(--panel-2);border:1px solid var(--border);color:var(--text-dim);border-radius:5px;padding:6px 8px;font-size:10.5px;cursor:pointer;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.mat-row .mat-tex-thumb{flex:0 0 auto;width:24px;height:24px;border-radius:5px;border:1px solid var(--border);cursor:pointer;background:repeating-conic-gradient(#2a2b33 0 25%, #202127 0 50%) 0 0/8px 8px;background-size:cover;background-position:center;}
 .mat-row .mat-tex-btn.filled{color:var(--accent);border-color:var(--accent-dim);}
 .mat-row .mat-tex-clear{flex:0 0 auto;width:22px;height:22px;border-radius:5px;background:var(--panel-2);border:1px solid var(--border);color:var(--text-faint);cursor:pointer;font-size:12px;line-height:1;}
 .mat-row .mat-val{width:34px;flex:0 0 auto;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--text-dim);}
@@ -288,7 +289,7 @@ select{
           <div style="margin-top:4px;font-size:10.5px;">or click to browse</div>
         </div>
         <input type="file" id="fileInput" accept=".glb,.gltf,.obj,.stl,.mtl,.png,.jpg,.jpeg,.webp" multiple style="display:none;">
-        <div class="formats-line">Supported: GLB, GLTF, OBJ, STL. Untuk OBJ dengan material, pilih file .obj + .mtl (+ tekstur) sekaligus.</div>
+        <div class="formats-line">Supported: GLB, GLTF, OBJ, STL. Model dengan tekstur terpisah? Pilih file model + gambar teksturnya sekaligus (begitu juga OBJ + .mtl).</div>
 
         <div class="divider"></div>
         <div class="lbl" style="color:var(--text-dim);font-size:11.5px;margin-bottom:6px;">Godot project (.tscn)</div>
@@ -556,7 +557,7 @@ document.getElementById('drawerToggleRight').addEventListener('click', ()=>openD
 backdrop.addEventListener('click', closeDrawers);
 window.addEventListener('resize', ()=>{ if (window.innerWidth > 860) closeDrawers(); });
 if (screen.orientation && screen.orientation.addEventListener){
-  screen.orientation.addEventListener('change', closeDrawers);
+  screen.orientation.addEventListener('change', ()=>{ closeDrawers(); try{ if (typeof resize==='function') resize(); }catch(e){} });
 }
 
 document.querySelectorAll('.section-head').forEach(h=>{
@@ -623,12 +624,33 @@ let bgSphere = null; // for image background
 
 function resize(){
   const w = wrap.clientWidth, h = wrap.clientHeight;
+  // The artifact/iframe host can report a stale or zero size during initial layout —
+  // skip those reads instead of sizing the renderer to 0 (which otherwise leaves the
+  // viewport stuck blank until something else, like Render, forces a fresh resize).
+  if (w < 2 || h < 2) return;
   camera.aspect = w/h;
   camera.updateProjectionMatrix();
   renderer.setSize(w,h,false);
+  renderer.render(scene, camera); // redraw immediately instead of waiting for the next rAF tick
 }
 new ResizeObserver(resize).observe(wrap);
 resize();
+window.addEventListener('load', resize);
+document.addEventListener('visibilitychange', ()=>{ if (!document.hidden) resize(); });
+[100, 300, 800, 1500].forEach(t=>setTimeout(resize, t));
+
+// Mobile GPUs/browsers can reclaim the WebGL context when the tab is backgrounded or
+// under memory pressure — this is a common cause of a viewport that "freezes" until
+// something else forces a redraw. Three.js re-uploads resources automatically once the
+// context is restored; we just need to resume rendering and resize once it's back.
+renderer.domElement.addEventListener('webglcontextlost', (e)=>{
+  e.preventDefault();
+  console.warn('WebGL context lost');
+}, false);
+renderer.domElement.addEventListener('webglcontextrestored', ()=>{
+  console.warn('WebGL context restored');
+  resize();
+}, false);
 
 let mixer = null;
 function animate(){
@@ -1226,15 +1248,62 @@ document.getElementById('godotZipInput').addEventListener('change', e=>{
 });
 
 /* ---------------- Import UI ---------------- */
+/* Load a .glb/.gltf selected together with separate texture image files. Any URI the
+   model references is matched against the other selected files by filename; anything
+   not provided falls back to the transparent-pixel placeholder (same as a lone GLB
+   with unresolvable external refs), so the import always succeeds either way. */
+async function loadModelWithAssets(files){
+  const modelFile = files.find(f=>['glb','gltf'].includes(extOf(f.name)));
+  if (!modelFile){ toast('Pilih file .glb atau .gltf.', true); return; }
+  const ext = extOf(modelFile.name);
+  clearModel();
+
+  const localAssets = new Map();
+  files.forEach(f=>{ if (f!==modelFile) localAssets.set(f.name.toLowerCase(), f); });
+
+  const manager = new THREE.LoadingManager();
+  manager.setURLModifier((url)=>{
+    if (url.startsWith('blob:') || url.startsWith('data:')) return url;
+    const base = url.split('/').pop().split('?')[0].toLowerCase();
+    if (localAssets.has(base)){
+      const f = localAssets.get(base);
+      if (!f.__blobUrl) f.__blobUrl = URL.createObjectURL(f);
+      return f.__blobUrl;
+    }
+    if (/\.(png|jpe?g|webp|gif|bmp|tga|ktx2?)(\?.*)?$/i.test(url)) return TRANSPARENT_PIXEL;
+    return url;
+  });
+
+  const onError = (e) => {
+    console.error(e);
+    toast('Unable to load this model. Please check that the file is a valid, uncorrupted ' + ext.toUpperCase() + ' file.', true);
+  };
+  const reader = new FileReader();
+  reader.onerror = () => onError(reader.error);
+  reader.onload = () => {
+    try{
+      new THREE.GLTFLoader(manager).parse(reader.result, '', gltf=>{
+        finishLoad(gltf.scene, modelFile, ext, gltf.animations || []);
+        toast('Model + ' + localAssets.size + ' aset pendukung dimuat: ' + modelFile.name);
+      }, onError);
+    } catch(e){ onError(e); }
+  };
+  if (ext === 'glb') reader.readAsArrayBuffer(modelFile);
+  else reader.readAsText(modelFile);
+}
+
 function routeFileImport(fileList){
   const files = Array.from(fileList);
   if (!files.length) return;
   const hasObj = files.some(f=>extOf(f.name)==='obj');
   const hasMtl = files.some(f=>extOf(f.name)==='mtl');
+  const hasModel = files.some(f=>['glb','gltf'].includes(extOf(f.name)));
   if (hasObj && files.length > 1){
     loadObjMtlBundle(files);
   } else if (hasMtl && !hasObj){
     toast('Pilih file .obj-nya juga bersamaan dengan .mtl.', true);
+  } else if (hasModel && files.length > 1){
+    loadModelWithAssets(files);
   } else {
     loadFile(files[0]);
   }
@@ -1381,15 +1450,32 @@ const MAT_TEX_SLOTS = [
   { key:'aoMap', label:'Ambient Occlusion Map', srgb:false }
 ];
 
+function getTexThumb(tex){
+  if (!tex || !tex.image) return null;
+  if (tex.userData && tex.userData.thumbDataUrl) return tex.userData.thumbDataUrl;
+  try {
+    const size = 48;
+    const c = document.createElement('canvas'); c.width = size; c.height = size;
+    c.getContext('2d').drawImage(tex.image, 0, 0, size, size);
+    const url = c.toDataURL('image/jpeg', 0.7);
+    if (!tex.userData) tex.userData = {};
+    tex.userData.thumbDataUrl = url;
+    return url;
+  } catch(e){ return null; } // e.g. image not fully decoded yet
+}
 function texRow(mat, slot){
   const row = document.createElement('div'); row.className='mat-row';
   const label = document.createElement('div'); label.className='mat-label'; label.textContent = slot.label;
-  const btn = document.createElement('div'); btn.className='mat-tex-btn';
   const tex = mat[slot.key];
+  const thumb = document.createElement('div'); thumb.className='mat-tex-thumb'; thumb.title = 'Attach texture…';
+  const thumbUrl = getTexThumb(tex);
+  if (thumbUrl) thumb.style.backgroundImage = 'url(' + thumbUrl + ')';
+  thumb.addEventListener('click', ()=>{ pendingTexSlot = slot.key; document.getElementById('matTexInput').click(); });
+  const btn = document.createElement('div'); btn.className='mat-tex-btn';
   btn.textContent = tex ? ((tex.userData && tex.userData.fileName) || 'Texture attached') : 'Attach texture…';
   if (tex) btn.classList.add('filled');
   btn.addEventListener('click', ()=>{ pendingTexSlot = slot.key; document.getElementById('matTexInput').click(); });
-  row.appendChild(label); row.appendChild(btn);
+  row.appendChild(label); row.appendChild(thumb); row.appendChild(btn);
   if (tex){
     const clr = document.createElement('div'); clr.className='mat-tex-clear'; clr.textContent = '✕'; clr.title='Remove texture';
     clr.addEventListener('click', ()=>{
