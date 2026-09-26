@@ -950,6 +950,7 @@ function godotPrimitiveGeometry(subRes){
    Returns a Promise so callers can await texture loading before treating the scene as ready. */
 async function godotMaterialToThree(matRes, ctx, assetMap){
   if (!matRes) return new THREE.MeshStandardMaterial({ color:0x9a9ba3, roughness:0.6, metalness:0.05 });
+  try {
   const p = matRes.props;
   const params = { roughness: p.roughness ?? 0.6, metalness: p.metallic ?? 0.0 };
   if (p.albedo_color) params.color = new THREE.Color(p.albedo_color.r, p.albedo_color.g, p.albedo_color.b);
@@ -959,19 +960,26 @@ async function godotMaterialToThree(matRes, ctx, assetMap){
     const file = resolveResPath(assetMap, texRef.path);
     if (file){
       const url = URL.createObjectURL(file);
-      await new Promise(res=>{
-        new THREE.TextureLoader().load(url, tex=>{
-          tex.encoding = THREE.sRGBEncoding;
-          tex.userData.fileName = texRef.path.split('/').pop();
-          mat.map = tex; mat.needsUpdate = true;
-          URL.revokeObjectURL(url); res();
-        }, undefined, ()=>{ godotStatus('Peringatan: gagal memuat tekstur: ' + texRef.path); URL.revokeObjectURL(url); res(); });
-      });
+      await Promise.race([
+        new Promise(res=>{
+          new THREE.TextureLoader().load(url, tex=>{
+            tex.encoding = THREE.sRGBEncoding;
+            tex.userData.fileName = texRef.path.split('/').pop();
+            mat.map = tex; mat.needsUpdate = true;
+            URL.revokeObjectURL(url); res();
+          }, undefined, ()=>{ godotStatus('Peringatan: gagal memuat tekstur: ' + texRef.path); URL.revokeObjectURL(url); res(); });
+        }),
+        new Promise(res=>setTimeout(()=>{ godotStatus('Peringatan: tekstur terlalu lama dimuat, dilewati: ' + texRef.path); res(); }, 8000))
+      ]);
     } else {
       godotStatus('Peringatan: tekstur tidak ditemukan di file yang diupload: ' + texRef.path);
     }
   }
   return mat;
+  } catch(e){
+    console.error('Godot material parse error:', e);
+    return new THREE.MeshStandardMaterial({ color:0x9a9ba3, roughness:0.6, metalness:0.05 });
+  }
 }
 
 /* ---- Main entry: parse a .tscn File and render only MeshInstance3D nodes ---- */
@@ -983,51 +991,58 @@ async function loadGodotScene(tscnFile, assetMap){
   let imported = 0, skipped = 0, pending = [];
 
   for (const node of ctx.nodes){
-    if (node.type !== 'MeshInstance3D'){ skipped++; continue; }
+    try {
+      if (node.type !== 'MeshInstance3D'){ skipped++; continue; }
 
-    const meshVal = resolveRef(node.props.mesh, ctx);
-    let materialOverride = resolveRef(node.props['surface_material_override/0'], ctx);
-    const matrix = node.props.transform ? matrixFromGodotTransform(node.props.transform.transform) : new THREE.Matrix4();
+      const meshVal = resolveRef(node.props.mesh, ctx);
+      let materialOverride = resolveRef(node.props['surface_material_override/0'], ctx);
+      const matrix = node.props.transform ? matrixFromGodotTransform(node.props.transform.transform) : new THREE.Matrix4();
 
-    if (!meshVal){ skipped++; continue; }
+      if (!meshVal){ skipped++; continue; }
 
-    if (meshVal.kind === 'ext'){
-      // External model file (.glb/.gltf) referenced by ext_resource
-      const file = resolveResPath(assetMap, meshVal.path);
-      if (!file){ godotStatus('Peringatan: aset model tidak ditemukan: ' + meshVal.path); skipped++; continue; }
-      const url = URL.createObjectURL(file);
-      const p = new Promise(res=>{
-        new THREE.GLTFLoader().load(url, async gltf=>{
-          const obj = gltf.scene;
-          obj.applyMatrix4(matrix);
-          if (materialOverride){
-            const threeMat = await godotMaterialToThree(materialOverride, ctx, assetMap);
-            obj.traverse(o=>{ if (o.isMesh) o.material = threeMat; });
-          }
-          obj.traverse(o=>{ if (o.isMesh){ o.castShadow = true; o.receiveShadow = true; } });
-          group.add(obj);
+      if (meshVal.kind === 'ext'){
+        // External model file (.glb/.gltf) referenced by ext_resource
+        const file = resolveResPath(assetMap, meshVal.path);
+        if (!file){ godotStatus('Peringatan: aset model tidak ditemukan: ' + meshVal.path); skipped++; continue; }
+        const url = URL.createObjectURL(file);
+        const p = new Promise((res, rej)=>{
+          new THREE.GLTFLoader().load(url, async gltf=>{
+            try {
+              const obj = gltf.scene;
+              obj.applyMatrix4(matrix);
+              if (materialOverride){
+                const threeMat = await godotMaterialToThree(materialOverride, ctx, assetMap);
+                obj.traverse(o=>{ if (o.isMesh) o.material = threeMat; });
+              }
+              obj.traverse(o=>{ if (o.isMesh){ o.castShadow = true; o.receiveShadow = true; } });
+              group.add(obj);
+              imported++;
+            } catch(e){ console.error('Godot node error (ext):', node.name, e); skipped++; }
+            URL.revokeObjectURL(url);
+            res();
+          }, undefined, ()=>{ godotStatus('Gagal memuat aset: ' + meshVal.path); skipped++; res(); });
+        });
+        pending.push(p);
+      } else if (meshVal.kind === 'sub'){
+        // Built-in Godot primitive mesh: generate procedurally
+        const geo = godotPrimitiveGeometry(meshVal);
+        const matRes = materialOverride || resolveRef(meshVal.props.material, ctx);
+        const p = godotMaterialToThree(matRes, ctx, assetMap).then(mat=>{
+          const mesh = new THREE.Mesh(geo, mat);
+          mesh.applyMatrix4(matrix);
+          mesh.castShadow = true; mesh.receiveShadow = true;
+          group.add(mesh);
           imported++;
-          URL.revokeObjectURL(url);
-          res();
-        }, undefined, ()=>{ godotStatus('Gagal memuat aset: ' + meshVal.path); res(); });
-      });
-      pending.push(p);
-    } else if (meshVal.kind === 'sub'){
-      // Built-in Godot primitive mesh: generate procedurally
-      const geo = godotPrimitiveGeometry(meshVal);
-      const matRes = materialOverride || resolveRef(meshVal.props.material, ctx);
-      const p = godotMaterialToThree(matRes, ctx, assetMap).then(mat=>{
-        const mesh = new THREE.Mesh(geo, mat);
-        mesh.applyMatrix4(matrix);
-        mesh.castShadow = true; mesh.receiveShadow = true;
-        group.add(mesh);
-        imported++;
-      });
-      pending.push(p);
+        }).catch(e=>{ console.error('Godot node error (sub):', node.name, e); skipped++; });
+        pending.push(p);
+      }
+    } catch(e){
+      console.error('Godot node error:', node.name, e);
+      skipped++;
     }
   }
 
-  await Promise.all(pending);
+  await Promise.allSettled(pending);
 
   if (imported === 0){
     toast('Tidak ada MeshInstance3D visual yang berhasil diimpor dari scene ini.', true);
