@@ -136,6 +136,9 @@ select{
 #dropzone svg{width:26px;height:26px;margin-bottom:8px;color:var(--text-faint);}
 #dropzone.drag svg{color:var(--accent);}
 .formats-line{color:var(--text-faint);font-size:10.5px;margin-top:10px;}
+#godotStatus{max-height:120px;overflow-y:auto;font-family:'IBM Plex Mono',monospace;font-size:10px;line-height:1.6;background:#0e0f13;border:1px solid var(--border);border-radius:5px;padding:6px 8px;margin-top:8px;}
+#godotStatus div{color:var(--text-dim);}
+#godotStatus div:last-child{color:var(--text);}
 
 /* drag overlay on viewport */
 #dragOverlay{
@@ -284,8 +287,8 @@ select{
           <div>Drop your 3D model here</div>
           <div style="margin-top:4px;font-size:10.5px;">or click to browse</div>
         </div>
-        <input type="file" id="fileInput" accept=".glb,.gltf,.obj,.stl" style="display:none;">
-        <div class="formats-line">Supported: GLB, GLTF, OBJ, STL</div>
+        <input type="file" id="fileInput" accept=".glb,.gltf,.obj,.stl,.mtl,.png,.jpg,.jpeg,.webp" multiple style="display:none;">
+        <div class="formats-line">Supported: GLB, GLTF, OBJ, STL. Untuk OBJ dengan material, pilih file .obj + .mtl (+ tekstur) sekaligus.</div>
 
         <div class="divider"></div>
         <div class="lbl" style="color:var(--text-dim);font-size:11.5px;margin-bottom:6px;">Godot project (.tscn)</div>
@@ -513,6 +516,7 @@ select{
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/MTLLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
@@ -527,7 +531,10 @@ function toast(msg, isErr){
   el.classList.toggle('err', !!isErr);
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(()=>el.classList.remove('show'), 4200);
+  // Base reading time + extra per character, clamped to a sane range so short
+  // toasts don't linger and long explanatory ones stay readable.
+  const duration = Math.min(12000, Math.max(3000, 1400 + msg.length * 60));
+  toastTimer = setTimeout(()=>el.classList.remove('show'), duration);
 }
 
 /* ---------------- UI bindings that must work even if the 3D engine fails ---------------- */
@@ -686,6 +693,67 @@ function setEmptyState(has){
 const loadingManager = new THREE.LoadingManager();
 function extOf(name){ return name.split('.').pop().toLowerCase(); }
 
+/* A model (GLB/GLTF, or an OBJ+MTL bundle) may reference external texture files that
+   the user didn't provide (or can't be resolved from a browser upload at all, e.g. a
+   relative path baked into a .glb). Rather than letting that abort the whole import,
+   redirect just that image request to a 1x1 transparent pixel — the mesh still loads,
+   and the user can attach a real texture manually via the Material panel. */
+const TRANSPARENT_PIXEL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+THREE.DefaultLoadingManager.setURLModifier((url)=>{
+  if (url.startsWith('blob:') || url.startsWith('data:')) return url;
+  if (/\.(png|jpe?g|jpg|webp|gif|bmp|tga|ktx2?)(\?.*)?$/i.test(url)) return TRANSPARENT_PIXEL;
+  return url;
+});
+
+function readAsText(file){
+  return new Promise((res, rej)=>{ const r = new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(r.error); r.readAsText(file); });
+}
+
+/* Load an .obj alongside its .mtl (and any texture files selected together with it).
+   Textures the .mtl references by filename are matched against the other selected
+   files; anything not provided falls back to the transparent-pixel placeholder via
+   the global URL modifier, so the import still succeeds either way. */
+async function loadObjMtlBundle(files){
+  const objFile = files.find(f=>extOf(f.name)==='obj');
+  const mtlFile = files.find(f=>extOf(f.name)==='mtl');
+  if (!objFile){ toast('Pilih minimal satu file .obj.', true); return; }
+  clearModel();
+
+  const localAssets = new Map();
+  files.forEach(f=>{ if (f!==objFile && f!==mtlFile) localAssets.set(f.name.toLowerCase(), f); });
+
+  const onError = (e) => {
+    console.error(e);
+    toast('Gagal memuat OBJ' + (mtlFile?' + MTL':'') + '. Pastikan file .obj (dan .mtl jika ada) valid.', true);
+  };
+
+  try {
+    let materials = null;
+    if (mtlFile){
+      const mtlText = await readAsText(mtlFile);
+      const manager = new THREE.LoadingManager();
+      manager.setURLModifier((url)=>{
+        const base = url.split('/').pop().toLowerCase();
+        if (localAssets.has(base)){
+          const f = localAssets.get(base);
+          if (!f.__blobUrl) f.__blobUrl = URL.createObjectURL(f);
+          return f.__blobUrl;
+        }
+        return TRANSPARENT_PIXEL;
+      });
+      const mtlLoader = new THREE.MTLLoader(manager);
+      materials = mtlLoader.parse(mtlText, '');
+      materials.preload();
+    }
+    const objLoader = new THREE.OBJLoader();
+    if (materials) objLoader.setMaterials(materials);
+    const objText = await readAsText(objFile);
+    const obj = objLoader.parse(objText);
+    finishLoad(obj, objFile, 'obj', []);
+    toast(mtlFile ? 'OBJ + MTL dimuat: ' + objFile.name : 'OBJ dimuat (tanpa MTL): ' + objFile.name);
+  } catch(e){ onError(e); }
+}
+
 function loadFile(file){
   const ext = extOf(file.name);
   const supported = ['glb','gltf','obj','stl'];
@@ -693,41 +761,42 @@ function loadFile(file){
     toast('Unable to load this model. "."' + ext + '" is not supported. Try GLB, GLTF, OBJ, or STL.', true);
     return;
   }
-  const url = URL.createObjectURL(file);
   clearModel();
 
   const onError = (e) => {
     console.error(e);
-    toast('Unable to load this model. Please check that the file is a valid, uncorrupted ' + ext.toUpperCase() + ' file.', true);
-    URL.revokeObjectURL(url);
+    const msg = (e && e.message) ? e.message : String(e);
+    if (/fetch/i.test(msg)){
+      toast('Model ini mereferensikan file eksternal (mis. tekstur terpisah) yang tidak ikut ter-embed di dalam file ' + ext.toUpperCase() + '-nya, jadi tidak bisa dimuat hanya dari satu file ini. Coba re-export model dari software 3D Anda dengan opsi "Embed Textures" / "Embed All" diaktifkan.', true);
+    } else {
+      toast('Unable to load this model. Please check that the file is a valid, uncorrupted ' + ext.toUpperCase() + ' file.', true);
+    }
   };
 
-  try{
-    if (ext === 'glb' || ext === 'gltf'){
-      const loader = new THREE.GLTFLoader();
-      loader.load(url, (gltf)=>{
-        const obj = gltf.scene;
-        finishLoad(obj, file, ext, gltf.animations || []);
-        URL.revokeObjectURL(url);
-      }, undefined, onError);
-    } else if (ext === 'obj'){
-      const loader = new THREE.OBJLoader();
-      loader.load(url, (obj)=>{
+  const reader = new FileReader();
+  reader.onerror = () => onError(reader.error);
+  reader.onload = () => {
+    try{
+      if (ext === 'glb' || ext === 'gltf'){
+        new THREE.GLTFLoader().parse(reader.result, '', gltf=>{
+          finishLoad(gltf.scene, file, ext, gltf.animations || []);
+        }, onError);
+      } else if (ext === 'obj'){
+        const obj = new THREE.OBJLoader().parse(reader.result);
         finishLoad(obj, file, ext, []);
-        URL.revokeObjectURL(url);
-      }, undefined, onError);
-    } else if (ext === 'stl'){
-      const loader = new THREE.STLLoader();
-      loader.load(url, (geometry)=>{
+      } else if (ext === 'stl'){
+        const geometry = new THREE.STLLoader().parse(reader.result);
         geometry.computeVertexNormals();
         const mat = new THREE.MeshStandardMaterial({ color:0xbfc2cc, roughness:0.45, metalness:0.15 });
         const mesh = new THREE.Mesh(geometry, mat);
         const obj = new THREE.Group(); obj.add(mesh);
         finishLoad(obj, file, ext, []);
-        URL.revokeObjectURL(url);
-      }, undefined, onError);
-    }
-  } catch(e){ onError(e); }
+      }
+    } catch(e){ onError(e); }
+  };
+  // GLB/STL are binary; OBJ/GLTF(JSON) are text
+  if (ext === 'glb' || ext === 'stl') reader.readAsArrayBuffer(file);
+  else reader.readAsText(file);
 }
 
 function finishLoad(obj, file, ext, animations){
@@ -802,7 +871,14 @@ document.getElementById('animPlay').addEventListener('click', ()=>{
 
 /* ================= Godot .tscn import module ================= */
 const godotStatusEl = document.getElementById('godotStatus');
-function godotStatus(msg){ godotStatusEl.style.display='block'; godotStatusEl.textContent = msg; }
+function godotStatus(msg){
+  godotStatusEl.style.display='block';
+  const line = document.createElement('div');
+  line.textContent = msg;
+  godotStatusEl.appendChild(line);
+  godotStatusEl.scrollTop = godotStatusEl.scrollHeight;
+}
+function godotStatusReset(){ godotStatusEl.innerHTML = ''; godotStatusEl.style.display='none'; }
 
 /* ---- Asset map: normalized "res://"-relative path -> File/Blob ---- */
 function buildAssetMapFromFileList(fileList){
@@ -837,8 +913,11 @@ async function buildAssetMapFromZip(file){
 }
 function resolveResPath(assetMap, resPath){
   if (!resPath) return null;
-  const clean = resPath.replace('res://','').replace(/^\/+/,'').toLowerCase();
+  const clean = resPath.replace('res://','').replace(/^\/+/,'').replace(/\\/g,'/').toLowerCase();
   if (assetMap.has(clean)) return assetMap.get(clean);
+  // folder structure in the upload may not exactly mirror the project — try suffix matches first
+  for (const [k,v] of assetMap){ if (k === clean || k.endsWith('/'+clean) || clean.endsWith('/'+k)) return v; }
+  // last resort: match by filename only (least precise, but tolerant of very different layouts)
   const base = clean.split('/').pop();
   for (const [k,v] of assetMap){ if (k.split('/').pop() === base) return v; }
   return null;
@@ -948,6 +1027,50 @@ function godotPrimitiveGeometry(subRes){
 
 /* ---- Build a THREE material from a StandardMaterial3D / ORMMaterial3D sub_resource ----
    Returns a Promise so callers can await texture loading before treating the scene as ready. */
+/* ---- Robust texture loading: decodes via createImageBitmap (falls back to <img> if
+   unavailable), then auto-downscales oversized images before creating the GPU texture.
+   Raw phone-camera photos are often 3000-8000px wide — uploading that directly as a
+   texture can fail or exhaust memory on mobile/webview contexts. Returns null only if
+   the file genuinely can't be decoded as an image at all. ---- */
+const MAX_TEX_DIM = 2048;
+async function loadTextureFromFile(file, srgb){
+  let source = null, w = 0, h = 0;
+
+  if (window.createImageBitmap){
+    try { source = await createImageBitmap(file); w = source.width; h = source.height; }
+    catch(e){ console.warn('createImageBitmap failed, trying <img> fallback:', e); }
+  }
+  if (!source){
+    source = await new Promise(resolve=>{
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = ()=>{ URL.revokeObjectURL(url); resolve(img); };
+      img.onerror = ()=>{ URL.revokeObjectURL(url); resolve(null); };
+      img.src = url;
+    });
+    if (source){ w = source.naturalWidth || source.width; h = source.naturalHeight || source.height; }
+  }
+  if (!source) return null;
+
+  let finalSource = source;
+  if (w > MAX_TEX_DIM || h > MAX_TEX_DIM){
+    const scale = MAX_TEX_DIM / Math.max(w, h);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(w*scale));
+    canvas.height = Math.max(1, Math.round(h*scale));
+    canvas.getContext('2d').drawImage(source, 0, 0, canvas.width, canvas.height);
+    finalSource = canvas;
+    if (source.close) source.close(); // free the original ImageBitmap
+  }
+
+  const tex = new THREE.Texture(finalSource);
+  tex.encoding = srgb ? THREE.sRGBEncoding : THREE.LinearEncoding;
+  tex.needsUpdate = true;
+  if (!tex.userData) tex.userData = {};
+  tex.userData.fileName = file.name || '';
+  return tex;
+}
+
 async function godotMaterialToThree(matRes, ctx, assetMap){
   if (!matRes) return new THREE.MeshStandardMaterial({ color:0x9a9ba3, roughness:0.6, metalness:0.05 });
   try {
@@ -959,20 +1082,20 @@ async function godotMaterialToThree(matRes, ctx, assetMap){
   if (texRef && texRef.path){
     const file = resolveResPath(assetMap, texRef.path);
     if (file){
-      const url = URL.createObjectURL(file);
-      await Promise.race([
-        new Promise(res=>{
-          new THREE.TextureLoader().load(url, tex=>{
-            tex.encoding = THREE.sRGBEncoding;
-            tex.userData.fileName = texRef.path.split('/').pop();
-            mat.map = tex; mat.needsUpdate = true;
-            URL.revokeObjectURL(url); res();
-          }, undefined, ()=>{ godotStatus('Peringatan: gagal memuat tekstur: ' + texRef.path); URL.revokeObjectURL(url); res(); });
-        }),
-        new Promise(res=>setTimeout(()=>{ godotStatus('Peringatan: tekstur terlalu lama dimuat, dilewati: ' + texRef.path); res(); }, 8000))
+      godotStatus('Tekstur ditemukan: ' + texRef.path + ' → memuat "' + (file.name || texRef.path.split('/').pop()) + '"…');
+      let settled = false;
+      const tex = await Promise.race([
+        loadTextureFromFile(file, true).then(t=>{ settled = true; return t; }),
+        new Promise(res=>setTimeout(()=>{ if (!settled) { godotStatus('Peringatan: tekstur terlalu lama dimuat, dilewati: ' + texRef.path); res(null); } }, 8000))
       ]);
+      if (tex){
+        mat.map = tex; mat.needsUpdate = true;
+        godotStatus('✓ Tekstur berhasil dipasang: ' + texRef.path.split('/').pop());
+      } else if (settled){
+        godotStatus('Peringatan: file ditemukan ("' + (file.name||'') + '", ' + (file.size ? Math.round(file.size/1024)+' KB' : 'ukuran tidak diketahui') + ') tapi gagal didekode sebagai gambar — kemungkinan format foto tidak standar (mis. HEIC/MPO berlabel .jpg). Coba simpan ulang gambar sebagai PNG/JPG biasa lalu attach manual lewat panel Material.: ' + texRef.path);
+      }
     } else {
-      godotStatus('Peringatan: tekstur tidak ditemukan di file yang diupload: ' + texRef.path);
+      godotStatus('✕ Tekstur TIDAK ditemukan di file yang diupload: ' + texRef.path);
     }
   }
   return mat;
@@ -1072,14 +1195,18 @@ async function loadGodotScene(tscnFile, assetMap){
 async function handleGodotUpload(assetMapPromise){
   try{
     const assetMap = await assetMapPromise;
-    let tscnFile = null;
+    godotStatusReset();
+    godotStatus(assetMap.size + ' file terbaca dari upload.');
+    let tscnFile = null, tscnKey = null;
     for (const [key, v] of assetMap){
-      if (key.endsWith('.tscn')) { tscnFile = v; if (!tscnFile.name) tscnFile.name = key.split('/').pop(); break; }
+      if (key.endsWith('.tscn')) { tscnFile = v; tscnKey = key; if (!tscnFile.name) tscnFile.name = key.split('/').pop(); break; }
     }
     if (!tscnFile){
       toast('Tidak ditemukan file .tscn di dalam folder/zip yang diupload.', true);
+      godotStatus('✕ Tidak ada file .tscn ditemukan di antara ' + assetMap.size + ' file yang diupload.');
       return;
     }
+    godotStatus('Scene ditemukan: ' + tscnKey);
     godotStatus('Memproses ' + (tscnFile.name || 'scene') + ' …');
     await loadGodotScene(tscnFile, assetMap);
   } catch(e){
@@ -1099,9 +1226,22 @@ document.getElementById('godotZipInput').addEventListener('change', e=>{
 });
 
 /* ---------------- Import UI ---------------- */
+function routeFileImport(fileList){
+  const files = Array.from(fileList);
+  if (!files.length) return;
+  const hasObj = files.some(f=>extOf(f.name)==='obj');
+  const hasMtl = files.some(f=>extOf(f.name)==='mtl');
+  if (hasObj && files.length > 1){
+    loadObjMtlBundle(files);
+  } else if (hasMtl && !hasObj){
+    toast('Pilih file .obj-nya juga bersamaan dengan .mtl.', true);
+  } else {
+    loadFile(files[0]);
+  }
+}
 const fileInput = document.getElementById('fileInput');
 document.getElementById('dropzone').addEventListener('click', ()=>fileInput.click());
-fileInput.addEventListener('change', e=>{ if (e.target.files[0]) loadFile(e.target.files[0]); });
+fileInput.addEventListener('change', e=>routeFileImport(e.target.files));
 
 ['dragenter','dragover'].forEach(ev=>wrap.addEventListener(ev, e=>{
   e.preventDefault(); document.getElementById('dragOverlay').classList.add('show');
@@ -1113,8 +1253,7 @@ fileInput.addEventListener('change', e=>{ if (e.target.files[0]) loadFile(e.targ
 }));
 wrap.addEventListener('drop', e=>{
   e.preventDefault();
-  const f = e.dataTransfer.files[0];
-  if (f) loadFile(f);
+  routeFileImport(e.dataTransfer.files);
 });
 
 /* ---------------- Transform panel ---------------- */
@@ -1247,7 +1386,7 @@ function texRow(mat, slot){
   const label = document.createElement('div'); label.className='mat-label'; label.textContent = slot.label;
   const btn = document.createElement('div'); btn.className='mat-tex-btn';
   const tex = mat[slot.key];
-  btn.textContent = tex ? (tex.userData.fileName || 'Texture attached') : 'Attach texture…';
+  btn.textContent = tex ? ((tex.userData && tex.userData.fileName) || 'Texture attached') : 'Attach texture…';
   if (tex) btn.classList.add('filled');
   btn.addEventListener('click', ()=>{ pendingTexSlot = slot.key; document.getElementById('matTexInput').click(); });
   row.appendChild(label); row.appendChild(btn);
@@ -1326,24 +1465,20 @@ function buildMaterialControlsUI(mesh){
   c.appendChild(toggleRow('Double-sided', mat.side===THREE.DoubleSide, v=>{ mat.side = v?THREE.DoubleSide:THREE.FrontSide; }));
 }
 
-document.getElementById('matTexInput').addEventListener('change', e=>{
+document.getElementById('matTexInput').addEventListener('change', async e=>{
   const file = e.target.files[0];
   e.target.value = '';
   if (!file || !activeMatMesh || !pendingTexSlot) return;
   const slot = MAT_TEX_SLOTS.find(s=>s.key===pendingTexSlot);
-  const url = URL.createObjectURL(file);
-  new THREE.TextureLoader().load(url, tex=>{
-    tex.encoding = slot.srgb ? THREE.sRGBEncoding : THREE.LinearEncoding;
-    tex.userData.fileName = file.name;
-    const mat = activeMatMesh.material;
-    if (mat[slot.key]) mat[slot.key].dispose();
-    mat[slot.key] = tex;
-    if (slot.key === 'normalMap' && !mat.normalScale) mat.normalScale = new THREE.Vector2(1,1);
-    mat.needsUpdate = true;
-    URL.revokeObjectURL(url);
-    buildMaterialControlsUI(activeMatMesh);
-    toast('Texture attached: ' + file.name);
-  }, undefined, ()=>{ toast('Unable to load this image as a texture.', true); URL.revokeObjectURL(url); });
+  const tex = await loadTextureFromFile(file, slot.srgb);
+  if (!tex){ toast('Gagal membaca gambar ini — coba format PNG/JPG standar.', true); return; }
+  const mat = activeMatMesh.material;
+  if (mat[slot.key]) mat[slot.key].dispose();
+  mat[slot.key] = tex;
+  if (slot.key === 'normalMap' && !mat.normalScale) mat.normalScale = new THREE.Vector2(1,1);
+  mat.needsUpdate = true;
+  buildMaterialControlsUI(activeMatMesh);
+  toast('Texture attached: ' + file.name);
 });
 
 document.getElementById('btnResetMaterial').addEventListener('click', ()=>{
@@ -1425,14 +1560,11 @@ function applyGradient(){
 document.getElementById('bgGradTop').addEventListener('input', applyGradient);
 document.getElementById('bgGradBottom').addEventListener('input', applyGradient);
 document.getElementById('btnBgImage').addEventListener('click', ()=>document.getElementById('bgImageInput').click());
-document.getElementById('bgImageInput').addEventListener('change', e=>{
+document.getElementById('bgImageInput').addEventListener('change', async e=>{
   const f = e.target.files[0]; if (!f) return;
-  const url = URL.createObjectURL(f);
-  new THREE.TextureLoader().load(url, tex=>{
-    tex.encoding = THREE.sRGBEncoding;
-    scene.background = tex;
-    URL.revokeObjectURL(url);
-  }, undefined, ()=>toast('Unable to load this image.', true));
+  const tex = await loadTextureFromFile(f, true);
+  if (!tex){ toast('Gagal membaca gambar ini — coba format PNG/JPG standar.', true); return; }
+  scene.background = tex;
 });
 
 /* ---------------- Environment panel ---------------- */
