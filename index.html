@@ -946,8 +946,9 @@ function godotPrimitiveGeometry(subRes){
   }
 }
 
-/* ---- Build a THREE material from a StandardMaterial3D / ORMMaterial3D sub_resource ---- */
-function godotMaterialToThree(matRes, ctx, assetMap){
+/* ---- Build a THREE material from a StandardMaterial3D / ORMMaterial3D sub_resource ----
+   Returns a Promise so callers can await texture loading before treating the scene as ready. */
+async function godotMaterialToThree(matRes, ctx, assetMap){
   if (!matRes) return new THREE.MeshStandardMaterial({ color:0x9a9ba3, roughness:0.6, metalness:0.05 });
   const p = matRes.props;
   const params = { roughness: p.roughness ?? 0.6, metalness: p.metallic ?? 0.0 };
@@ -958,7 +959,14 @@ function godotMaterialToThree(matRes, ctx, assetMap){
     const file = resolveResPath(assetMap, texRef.path);
     if (file){
       const url = URL.createObjectURL(file);
-      new THREE.TextureLoader().load(url, tex=>{ tex.encoding = THREE.sRGBEncoding; mat.map = tex; mat.needsUpdate = true; URL.revokeObjectURL(url); });
+      await new Promise(res=>{
+        new THREE.TextureLoader().load(url, tex=>{
+          tex.encoding = THREE.sRGBEncoding;
+          tex.userData.fileName = texRef.path.split('/').pop();
+          mat.map = tex; mat.needsUpdate = true;
+          URL.revokeObjectURL(url); res();
+        }, undefined, ()=>{ godotStatus('Peringatan: gagal memuat tekstur: ' + texRef.path); URL.revokeObjectURL(url); res(); });
+      });
     } else {
       godotStatus('Peringatan: tekstur tidak ditemukan di file yang diupload: ' + texRef.path);
     }
@@ -989,11 +997,11 @@ async function loadGodotScene(tscnFile, assetMap){
       if (!file){ godotStatus('Peringatan: aset model tidak ditemukan: ' + meshVal.path); skipped++; continue; }
       const url = URL.createObjectURL(file);
       const p = new Promise(res=>{
-        new THREE.GLTFLoader().load(url, gltf=>{
+        new THREE.GLTFLoader().load(url, async gltf=>{
           const obj = gltf.scene;
           obj.applyMatrix4(matrix);
           if (materialOverride){
-            const threeMat = godotMaterialToThree(materialOverride, ctx, assetMap);
+            const threeMat = await godotMaterialToThree(materialOverride, ctx, assetMap);
             obj.traverse(o=>{ if (o.isMesh) o.material = threeMat; });
           }
           obj.traverse(o=>{ if (o.isMesh){ o.castShadow = true; o.receiveShadow = true; } });
@@ -1008,12 +1016,14 @@ async function loadGodotScene(tscnFile, assetMap){
       // Built-in Godot primitive mesh: generate procedurally
       const geo = godotPrimitiveGeometry(meshVal);
       const matRes = materialOverride || resolveRef(meshVal.props.material, ctx);
-      const mat = godotMaterialToThree(matRes, ctx, assetMap);
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.applyMatrix4(matrix);
-      mesh.castShadow = true; mesh.receiveShadow = true;
-      group.add(mesh);
-      imported++;
+      const p = godotMaterialToThree(matRes, ctx, assetMap).then(mat=>{
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.applyMatrix4(matrix);
+        mesh.castShadow = true; mesh.receiveShadow = true;
+        group.add(mesh);
+        imported++;
+      });
+      pending.push(p);
     }
   }
 
@@ -1146,24 +1156,36 @@ let pendingTexSlot = null;
 function normalizeMaterial(mesh){
   if (mesh.userData.__matNormalized) return;
   const old = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
-  const std = new THREE.MeshStandardMaterial({
-    color: (old && old.color) ? old.color.clone() : new THREE.Color(0xbfc2cc),
-    map: old ? old.map || null : null,
-    metalness: (old && old.metalness !== undefined) ? old.metalness : 0.1,
-    roughness: (old && old.roughness !== undefined) ? old.roughness : 0.7,
-    transparent: old ? !!old.transparent : false,
-    opacity: old ? (old.opacity ?? 1) : 1,
-    emissive: (old && old.emissive) ? old.emissive.clone() : new THREE.Color(0x000000),
-    side: THREE.FrontSide
-  });
+  let std;
+  if (old && old.isMeshStandardMaterial){
+    // Already a compatible PBR material (glTF, Godot-derived, STL/primitive) — keep the
+    // same object reference so any texture that finishes loading after this point (or was
+    // already assigned) is preserved instead of being dropped by a fresh copy.
+    std = old;
+    if (std.opacity === undefined) std.opacity = 1;
+    if (std.metalness === undefined) std.metalness = 0.1;
+    if (std.roughness === undefined) std.roughness = 0.7;
+  } else {
+    std = new THREE.MeshStandardMaterial({
+      color: (old && old.color) ? old.color.clone() : new THREE.Color(0xbfc2cc),
+      map: old ? old.map || null : null,
+      metalness: (old && old.metalness !== undefined) ? old.metalness : 0.1,
+      roughness: (old && old.roughness !== undefined) ? old.roughness : 0.7,
+      transparent: old ? !!old.transparent : false,
+      opacity: old ? (old.opacity ?? 1) : 1,
+      emissive: (old && old.emissive) ? old.emissive.clone() : new THREE.Color(0x000000),
+      side: THREE.FrontSide
+    });
+  }
   mesh.material = std;
   mesh.userData.__matNormalized = true;
   mesh.userData.origMat = {
     color: std.color.clone(), metalness: std.metalness, roughness: std.roughness,
     opacity: std.opacity, transparent: std.transparent,
     emissive: std.emissive.clone(), emissiveIntensity: std.emissiveIntensity,
-    map: std.map, normalMap:null, roughnessMap:null, metalnessMap:null, emissiveMap:null, aoMap:null,
-    wireframe:false, side: THREE.FrontSide
+    map: std.map||null, normalMap: std.normalMap||null, roughnessMap: std.roughnessMap||null,
+    metalnessMap: std.metalnessMap||null, emissiveMap: std.emissiveMap||null, aoMap: std.aoMap||null,
+    wireframe: !!std.wireframe, side: std.side
   };
 }
 
