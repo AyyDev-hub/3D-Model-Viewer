@@ -116,6 +116,15 @@ select{
 .hint{color:var(--text-faint);font-size:10.5px;margin-top:6px;line-height:1.5;}
 .mini{width:100%;margin-top:10px;justify-content:center;}
 .divider{height:1px;background:var(--border);margin:12px 0;}
+.mat-row{display:flex;align-items:center;gap:6px;margin-top:9px;}
+.mat-row .mat-label{flex:0 0 auto;width:82px;color:var(--text-dim);font-size:11px;}
+.mat-row .mat-ctrl{flex:1;min-width:0;}
+.mat-row input[type=range]{margin:0;}
+.mat-row .mat-tex-btn{flex:1;background:var(--panel-2);border:1px solid var(--border);color:var(--text-dim);border-radius:5px;padding:6px 8px;font-size:10.5px;cursor:pointer;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.mat-row .mat-tex-btn.filled{color:var(--accent);border-color:var(--accent-dim);}
+.mat-row .mat-tex-clear{flex:0 0 auto;width:22px;height:22px;border-radius:5px;background:var(--panel-2);border:1px solid var(--border);color:var(--text-faint);cursor:pointer;font-size:12px;line-height:1;}
+.mat-row .mat-val{width:34px;flex:0 0 auto;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--text-dim);}
+.mat-section-title{color:var(--text-faint);font-size:10px;text-transform:uppercase;letter-spacing:.5px;margin-top:14px;margin-bottom:2px;}
 
 /* import zone */
 #dropzone{
@@ -315,6 +324,17 @@ select{
       </div>
     </div>
 
+    <div class="section" data-s="material">
+      <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 000 18 4.5 4.5 0 010-9 3 3 0 003-3 4.5 4.5 0 01-3-6z"/></svg>Material<span class="chev">▸</span></div>
+      <div class="section-body">
+        <label class="field"><div class="lbl">Mesh</div><select id="matMeshSelect"><option>No model loaded</option></select></label>
+        <div id="materialControls"></div>
+        <button class="btn mini" id="btnResetMaterial">Reset Material</button>
+        <div class="hint">Model tanpa tekstur? Pasang gambar secara manual lewat slot "Base Color Map" dsb. di atas.</div>
+        <input type="file" id="matTexInput" accept="image/*" style="display:none;">
+      </div>
+    </div>
+
     <div class="section" data-s="camera">
       <div class="section-head"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3"/></svg>Camera<span class="chev">▸</span></div>
       <div class="section-body">
@@ -458,10 +478,10 @@ select{
         </label>
         <label class="field"><div class="lbl">Transparent background</div></label>
         <div class="toggle-row" style="margin-top:2px;"><span class="lbl">Transparent PNG</span><div class="switch" id="transToggle"><div class="knob"></div></div></div>
-        <button class="btn primary mini" id="btnCapture">Render</button>
+        <button class="btn primary mini" id="btnCapture">Capture Render</button>
 
         <div id="screenshotPreview">
-          <img id="shotImg" alt="Screenshot preview">
+          <img id="shotImg" alt="Render preview">
           <div id="shotMeta"><span id="shotRes"></span><span id="shotFmt"></span></div>
           <div class="shot-actions">
             <button class="btn" id="btnDownload">Download</button>
@@ -761,6 +781,7 @@ function finishLoad(obj, file, ext, animations){
   }
 
   toast('Model loaded: ' + file.name);
+  refreshMeshSelector();
 }
 
 let playing = true;
@@ -1019,6 +1040,7 @@ async function loadGodotScene(tscnFile, assetMap){
   document.getElementById('infoAnim').textContent = '0';
   godotStatus(imported + ' mesh diimpor · ' + skipped + ' node non-visual (collision/light/dsb.) dilewati.');
   toast('Godot scene dimuat: ' + imported + ' mesh visual diimpor.');
+  refreshMeshSelector();
 }
 
 /* ---- Wire up folder/zip inputs: find the .tscn, build asset map, parse & render ---- */
@@ -1114,6 +1136,194 @@ document.getElementById('btnResetTransform').addEventListener('click', ()=>{
   frameModel(currentModel);
   document.getElementById('uniScale').value = 1;
   document.getElementById('uniScaleVal').textContent = '1.00';
+});
+
+/* ---------------- Material panel ---------------- */
+let sceneMeshes = [];
+let activeMatMesh = null;
+let pendingTexSlot = null;
+
+function normalizeMaterial(mesh){
+  if (mesh.userData.__matNormalized) return;
+  const old = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+  const std = new THREE.MeshStandardMaterial({
+    color: (old && old.color) ? old.color.clone() : new THREE.Color(0xbfc2cc),
+    map: old ? old.map || null : null,
+    metalness: (old && old.metalness !== undefined) ? old.metalness : 0.1,
+    roughness: (old && old.roughness !== undefined) ? old.roughness : 0.7,
+    transparent: old ? !!old.transparent : false,
+    opacity: old ? (old.opacity ?? 1) : 1,
+    emissive: (old && old.emissive) ? old.emissive.clone() : new THREE.Color(0x000000),
+    side: THREE.FrontSide
+  });
+  mesh.material = std;
+  mesh.userData.__matNormalized = true;
+  mesh.userData.origMat = {
+    color: std.color.clone(), metalness: std.metalness, roughness: std.roughness,
+    opacity: std.opacity, transparent: std.transparent,
+    emissive: std.emissive.clone(), emissiveIntensity: std.emissiveIntensity,
+    map: std.map, normalMap:null, roughnessMap:null, metalnessMap:null, emissiveMap:null, aoMap:null,
+    wireframe:false, side: THREE.FrontSide
+  };
+}
+
+function collectMeshes(root){
+  const list = [];
+  if (root) root.traverse(o=>{ if (o.isMesh){ normalizeMaterial(o); list.push(o); } });
+  return list;
+}
+
+function refreshMeshSelector(){
+  sceneMeshes = collectMeshes(currentModel);
+  const sel = document.getElementById('matMeshSelect');
+  sel.innerHTML = '';
+  if (!sceneMeshes.length){
+    sel.innerHTML = '<option>No model loaded</option>';
+    document.getElementById('materialControls').innerHTML = '';
+    activeMatMesh = null;
+    return;
+  }
+  sceneMeshes.forEach((m,i)=>{
+    const opt = document.createElement('option');
+    opt.value = i; opt.textContent = m.name || ('Mesh ' + (i+1));
+    sel.appendChild(opt);
+  });
+  activeMatMesh = sceneMeshes[0];
+  buildMaterialControlsUI(activeMatMesh);
+}
+document.getElementById('matMeshSelect').addEventListener('change', e=>{
+  activeMatMesh = sceneMeshes[parseInt(e.target.value)];
+  buildMaterialControlsUI(activeMatMesh);
+});
+
+const MAT_TEX_SLOTS = [
+  { key:'map', label:'Base Color Map', srgb:true },
+  { key:'normalMap', label:'Normal Map', srgb:false },
+  { key:'roughnessMap', label:'Roughness Map', srgb:false },
+  { key:'metalnessMap', label:'Metalness Map', srgb:false },
+  { key:'emissiveMap', label:'Emissive Map', srgb:true },
+  { key:'aoMap', label:'Ambient Occlusion Map', srgb:false }
+];
+
+function texRow(mat, slot){
+  const row = document.createElement('div'); row.className='mat-row';
+  const label = document.createElement('div'); label.className='mat-label'; label.textContent = slot.label;
+  const btn = document.createElement('div'); btn.className='mat-tex-btn';
+  const tex = mat[slot.key];
+  btn.textContent = tex ? (tex.userData.fileName || 'Texture attached') : 'Attach texture…';
+  if (tex) btn.classList.add('filled');
+  btn.addEventListener('click', ()=>{ pendingTexSlot = slot.key; document.getElementById('matTexInput').click(); });
+  row.appendChild(label); row.appendChild(btn);
+  if (tex){
+    const clr = document.createElement('div'); clr.className='mat-tex-clear'; clr.textContent = '✕'; clr.title='Remove texture';
+    clr.addEventListener('click', ()=>{
+      if (mat[slot.key]) mat[slot.key].dispose();
+      mat[slot.key] = null; mat.needsUpdate = true;
+      buildMaterialControlsUI(activeMatMesh);
+    });
+    row.appendChild(clr);
+  }
+  return row;
+}
+function sliderRow(labelText, value, min, max, step, onInput){
+  const row = document.createElement('div'); row.className='mat-row';
+  const label = document.createElement('div'); label.className='mat-label'; label.textContent = labelText;
+  const input = document.createElement('input'); input.type='range'; input.min=min; input.max=max; input.step=step; input.value=value;
+  input.className='mat-ctrl';
+  const val = document.createElement('div'); val.className='mat-val'; val.textContent = parseFloat(value).toFixed(2);
+  input.addEventListener('input', ()=>{ val.textContent = parseFloat(input.value).toFixed(2); onInput(parseFloat(input.value)); });
+  row.appendChild(label); row.appendChild(input); row.appendChild(val);
+  return row;
+}
+function colorRow(labelText, hexColor, onInput){
+  const row = document.createElement('div'); row.className='mat-row';
+  const label = document.createElement('div'); label.className='mat-label'; label.textContent = labelText;
+  const input = document.createElement('input'); input.type='color'; input.value = '#' + hexColor.getHexString();
+  input.addEventListener('input', ()=>onInput(input.value));
+  row.appendChild(label); row.appendChild(input);
+  return row;
+}
+function sectionTitle(text){
+  const t = document.createElement('div'); t.className='mat-section-title'; t.textContent = text; return t;
+}
+function toggleRow(labelText, checked, onToggle){
+  const row = document.createElement('div'); row.className='toggle-row'; row.style.marginTop='9px';
+  const label = document.createElement('span'); label.className='lbl'; label.textContent = labelText;
+  const sw = document.createElement('div'); sw.className = 'switch' + (checked?' on':'');
+  const knob = document.createElement('div'); knob.className='knob'; sw.appendChild(knob);
+  sw.addEventListener('click', ()=>{ sw.classList.toggle('on'); onToggle(sw.classList.contains('on')); });
+  row.appendChild(label); row.appendChild(sw);
+  return row;
+}
+
+function buildMaterialControlsUI(mesh){
+  const c = document.getElementById('materialControls');
+  c.innerHTML = '';
+  if (!mesh) return;
+  const mat = mesh.material;
+
+  c.appendChild(sectionTitle('Base Color'));
+  c.appendChild(colorRow('Color', mat.color, v=>{ mat.color.set(v); }));
+  c.appendChild(texRow(mat, MAT_TEX_SLOTS[0]));
+
+  c.appendChild(sectionTitle('Surface'));
+  c.appendChild(sliderRow('Metalness', mat.metalness, 0, 1, 0.01, v=>{ mat.metalness=v; }));
+  c.appendChild(texRow(mat, MAT_TEX_SLOTS[3]));
+  c.appendChild(sliderRow('Roughness', mat.roughness, 0, 1, 0.01, v=>{ mat.roughness=v; }));
+  c.appendChild(texRow(mat, MAT_TEX_SLOTS[2]));
+
+  c.appendChild(sectionTitle('Normal & AO'));
+  c.appendChild(texRow(mat, MAT_TEX_SLOTS[1]));
+  if (mat.normalMap) c.appendChild(sliderRow('Normal Str.', mat.normalScale.x, 0, 3, 0.05, v=>{ mat.normalScale.set(v,v); }));
+  c.appendChild(texRow(mat, MAT_TEX_SLOTS[5]));
+  if (mat.aoMap) c.appendChild(sliderRow('AO Intensity', mat.aoMapIntensity, 0, 2, 0.05, v=>{ mat.aoMapIntensity=v; }));
+
+  c.appendChild(sectionTitle('Emissive'));
+  c.appendChild(colorRow('Emissive', mat.emissive, v=>{ mat.emissive.set(v); }));
+  c.appendChild(sliderRow('Intensity', mat.emissiveIntensity, 0, 5, 0.05, v=>{ mat.emissiveIntensity=v; }));
+  c.appendChild(texRow(mat, MAT_TEX_SLOTS[4]));
+
+  c.appendChild(sectionTitle('Transparency & Render'));
+  c.appendChild(sliderRow('Opacity', mat.opacity, 0, 1, 0.01, v=>{ mat.opacity=v; mat.transparent = v<1; }));
+  c.appendChild(toggleRow('Wireframe', mat.wireframe, v=>{ mat.wireframe=v; }));
+  c.appendChild(toggleRow('Double-sided', mat.side===THREE.DoubleSide, v=>{ mat.side = v?THREE.DoubleSide:THREE.FrontSide; }));
+}
+
+document.getElementById('matTexInput').addEventListener('change', e=>{
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file || !activeMatMesh || !pendingTexSlot) return;
+  const slot = MAT_TEX_SLOTS.find(s=>s.key===pendingTexSlot);
+  const url = URL.createObjectURL(file);
+  new THREE.TextureLoader().load(url, tex=>{
+    tex.encoding = slot.srgb ? THREE.sRGBEncoding : THREE.LinearEncoding;
+    tex.userData.fileName = file.name;
+    const mat = activeMatMesh.material;
+    if (mat[slot.key]) mat[slot.key].dispose();
+    mat[slot.key] = tex;
+    if (slot.key === 'normalMap' && !mat.normalScale) mat.normalScale = new THREE.Vector2(1,1);
+    mat.needsUpdate = true;
+    URL.revokeObjectURL(url);
+    buildMaterialControlsUI(activeMatMesh);
+    toast('Texture attached: ' + file.name);
+  }, undefined, ()=>{ toast('Unable to load this image as a texture.', true); URL.revokeObjectURL(url); });
+});
+
+document.getElementById('btnResetMaterial').addEventListener('click', ()=>{
+  if (!activeMatMesh){ toast('No mesh selected.', true); return; }
+  const mat = activeMatMesh.material;
+  const o = activeMatMesh.userData.origMat;
+  ['map','normalMap','roughnessMap','metalnessMap','emissiveMap','aoMap'].forEach(k=>{
+    if (mat[k] && mat[k] !== o[k]) mat[k].dispose();
+    mat[k] = o[k] || null;
+  });
+  mat.color.copy(o.color); mat.metalness=o.metalness; mat.roughness=o.roughness;
+  mat.opacity=o.opacity; mat.transparent=o.transparent;
+  mat.emissive.copy(o.emissive); mat.emissiveIntensity=o.emissiveIntensity;
+  mat.wireframe=o.wireframe; mat.side=o.side;
+  mat.needsUpdate = true;
+  buildMaterialControlsUI(activeMatMesh);
+  toast('Material reset to original.');
 });
 
 /* ---------------- Camera panel ---------------- */
@@ -1277,6 +1487,7 @@ document.getElementById('hudGrid').addEventListener('click', ()=>{ grid.visible 
 /* ---------------- Reset all ---------------- */
 document.getElementById('btnResetAll').addEventListener('click', ()=>{
   clearModel();
+  refreshMeshSelector();
   setEmptyState(false);
   document.getElementById('fname').textContent = 'No model loaded';
   ['infoName','infoFormat','infoVerts','infoTris','infoMats','infoTex','infoAnim'].forEach(id=>document.getElementById(id).textContent='—');
@@ -1300,7 +1511,7 @@ document.getElementById('resGrid').addEventListener('click', e=>{
 document.getElementById('transToggle').addEventListener('click', function(){ this.classList.toggle('on'); });
 
 function captureScreenshot(){
-  if (!currentModel){ toast('Import the model before rendering the image.', true); return; }
+  if (!currentModel){ toast('Import a model before rendering.', true); return; }
   const [w,h] = selectedRes;
   const transparent = document.getElementById('transToggle').classList.contains('on');
   const format = document.getElementById('shotFormat').value;
@@ -1333,7 +1544,7 @@ function captureScreenshot(){
   document.getElementById('screenshotPreview').dataset.url = dataUrl;
   document.getElementById('screenshotPreview').dataset.format = format;
   document.getElementById('right').querySelector('[data-s="shot"]').classList.add('open');
-  toast('Screenshot captured at ' + w + '×' + h + '.');
+  toast('Render captured at ' + w + '×' + h + '.');
 }
 document.getElementById('btnShot').addEventListener('click', captureScreenshot);
 document.getElementById('btnCapture').addEventListener('click', captureScreenshot);
@@ -1344,7 +1555,7 @@ document.getElementById('btnDownload').addEventListener('click', ()=>{
   const pane = document.getElementById('screenshotPreview');
   const a = document.createElement('a');
   a.href = pane.dataset.url;
-  a.download = 'model-screenshot.' + (pane.dataset.format==='jpeg'?'jpg':pane.dataset.format);
+  a.download = 'model-render.' + (pane.dataset.format==='jpeg'?'jpg':pane.dataset.format);
   document.body.appendChild(a); a.click(); a.remove();
 });
 
