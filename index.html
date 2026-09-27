@@ -320,12 +320,12 @@ select{
         <div class="formats-line">Supported: GLB, GLTF, OBJ, STL. Model dengan tekstur terpisah? Pilih file model + gambar teksturnya sekaligus (begitu juga OBJ + .mtl).</div>
 
         <div class="divider"></div>
-        <div class="lbl" style="color:var(--text-dim);font-size:11.5px;margin-bottom:6px;">Godot project (.tscn)</div>
+        <div class="lbl" style="color:var(--text-dim);font-size:11.5px;margin-bottom:6px;">Godot scene (.tscn)</div>
         <button class="btn mini" id="btnGodotFolder" style="margin-top:0;">Upload Project Folder</button>
         <button class="btn mini" id="btnGodotZip">Upload Project .zip</button>
         <input type="file" id="godotFolderInput" webkitdirectory directory multiple style="display:none;">
         <input type="file" id="godotZipInput" accept=".zip" style="display:none;">
-        <div class="formats-line">Reads .tscn scene graph + matches res:// paths to uploaded assets. Only visual MeshInstance3D nodes are imported.</div>
+        <div class="formats-line">Upload satu file <b>.tscn</b> yang ingin diimpor beserta aset visual yang direferensikannya (model .glb/.gltf, tekstur .png/.jpg) — cukup dalam satu folder/zip, tidak perlu seluruh project Godot. Hanya node visual (MeshInstance3D) yang diimpor.</div>
         <div id="godotStatus" class="hint" style="display:none;"></div>
       </div>
     </div>
@@ -599,6 +599,7 @@ const HELP_TOPICS = {
       <li>Pastikan semua aset visual yang direferensikan (model .glb/.gltf, gambar tekstur .png/.jpg) ikut ter-include di dalam folder/zip tersebut, dengan struktur folder yang sama seperti project aslinya.</li>
       <li>Hanya node visual (<code>MeshInstance3D</code>) yang diimpor — collision, physics body, kamera, dan cahaya dari Godot otomatis di-skip.</li>
     </ul>
+    <p><b>💡 Cara lebih simpel (opsional):</b> kalau tidak mau repot menjaga struktur folder project, cukup kumpulkan <b>satu file .tscn</b> beserta <b>semua aset visual yang dipakai scene itu</b> (model & tekstur) ke dalam <b>satu folder/zip datar</b> — tidak perlu sama persis struktur foldernya. Forge otomatis mencocokkan aset berdasarkan nama filenya kalau path lengkapnya tidak ketemu. Cara ini lebih cepat disiapkan, tapi kurang aman kalau ada beberapa file dengan nama sama di scene yang berbeda.</p>
     <p class="accent">Tips: kalau tekstur tidak muncul setelah import, cek kotak log kecil di bawah tombol upload — biasanya menunjukkan file mana yang tidak ketemu.</p>`
   },
   material: {
