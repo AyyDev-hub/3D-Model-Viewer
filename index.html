@@ -1110,7 +1110,7 @@ function parseGdValue(str){
   if ((m = str.match(/^"(.*)"$/))) return m[1];
   if (str === 'true') return true;
   if (str === 'false') return false;
-  if (!isNaN(parseFloat(str)) && /^-?[\d.]+$/.test(str)) return parseFloat(str);
+  if (!isNaN(parseFloat(str)) && /^-?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(str)) return parseFloat(str);
   return str;
 }
 
@@ -1118,6 +1118,7 @@ function parseGdValue(str){
 function parseTscn(text){
   const lines = text.split(/\r?\n/);
   const extResources = {}, subResources = {}, nodes = [];
+  let resType = null, mainResource = null;
   let current = null;
   for (let raw of lines){
     const line = raw.trim();
@@ -1138,6 +1139,11 @@ function parseTscn(text){
       } else if (tag === 'node'){
         current = { kind:'node', name:attrs.name, type:attrs.type, parent:attrs.parent, props:{} };
         nodes.push(current);
+      } else if (tag === 'gd_resource'){
+        resType = attrs.type; current = null;
+      } else if (tag === 'resource'){
+        current = { kind:'sub', id:'__main', type:resType, props:{} };
+        mainResource = current;
       } else { current = null; }
       continue;
     }
@@ -1145,7 +1151,7 @@ function parseTscn(text){
     const propMatch = line.match(/^([\w\/]+)\s*=\s*(.+)$/);
     if (propMatch) current.props[propMatch[1]] = parseGdValue(propMatch[2]);
   }
-  return { extResources, subResources, nodes };
+  return { extResources, subResources, nodes, mainResource };
 }
 
 /* ---- Resolve a value that may be an ExtResource/SubResource reference ---- */
@@ -1157,45 +1163,146 @@ function resolveRef(val, ctx){
 
 /* ---- Build a THREE.Matrix4 from Godot's Transform3D(12 floats: basis 3x3 columns + origin) ---- */
 function matrixFromGodotTransform(t){
+  // Godot writes Transform3D as the basis ROW by row (Basis is row-major), then the origin.
   const m = new THREE.Matrix4();
-  // Godot stores basis column-major (xx,xy,xz, yx,yy,yz, zx,zy,zz) then origin(ox,oy,oz)
   m.set(
-    t[0], t[3], t[6], t[9],
-    t[1], t[4], t[7], t[10],
-    t[2], t[5], t[8], t[11],
+    t[0], t[1], t[2], t[9],
+    t[3], t[4], t[5], t[10],
+    t[6], t[7], t[8], t[11],
     0,0,0,1
   );
   return m;
 }
+// A node's own transform: either a full Transform3D, or position / rotation (Euler YXZ) / scale
+function godotLocalMatrix(node){
+  const p = node.props, m = new THREE.Matrix4();
+  if (p.transform && p.transform.transform && p.transform.transform.length >= 12) return matrixFromGodotTransform(p.transform.transform);
+  if (p.position || p.rotation || p.scale){
+    const pos = p.position ? new THREE.Vector3(p.position.x, p.position.y, p.position.z) : new THREE.Vector3();
+    const r = p.rotation || {x:0,y:0,z:0};
+    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(r.x, r.y, r.z, 'YXZ'));
+    const sc = p.scale ? new THREE.Vector3(p.scale.x, p.scale.y, p.scale.z) : new THREE.Vector3(1,1,1);
+    m.compose(pos, q, sc);
+  }
+  return m;
+}
+// Node paths ("." = root, "Body/Arm" ...) so child transforms can be composed with their parents'
+function buildNodeIndex(nodes){
+  const map = new Map();
+  nodes.forEach(n=>{
+    n.path = !n.parent ? '.' : (n.parent === '.' ? n.name : n.parent + '/' + n.name);
+    map.set(n.path, n);
+  });
+  return map;
+}
+function godotWorldMatrix(node, map){
+  if (node._world) return node._world;
+  const local = godotLocalMatrix(node);
+  const parent = node.parent ? map.get(node.parent) : null;
+  node._world = (parent && parent !== node) ? godotWorldMatrix(parent, map).clone().multiply(local) : local;
+  return node._world;
+}
 
 /* ---- Procedural primitive geometry for Godot built-in meshes (no external asset needed) ---- */
+/* Torus built exactly like Godot's TorusMesh (same vertex phase, so low segment counts match):
+   the cross-section starts at the INNER edge and the ring starts on the -Z axis.
+   Godot's triangles are clockwise-front, so the winding is flipped for Three.js. */
+function godotTorusGeometry(inner, outer, rings, segs){
+  const TAU = Math.PI*2, radius = (outer - inner)/2;
+  const pos = [], nor = [], uv = [], idx = [];
+  for (let i=0;i<=rings;i++){
+    const inci = i/rings, angi = inci*TAU;
+    const ni = (i === rings) ? [0,-1] : [-Math.sin(angi), -Math.cos(angi)];
+    for (let j=0;j<=segs;j++){
+      const incj = j/segs, angj = incj*TAU;
+      const nj = [-Math.cos(angj), Math.sin(angj)];
+      const k0 = nj[0]*radius + (inner + radius), k1 = nj[1]*radius;
+      pos.push(ni[0]*k0, k1, ni[1]*k0);
+      nor.push(ni[0]*nj[0], nj[1], ni[1]*nj[0]);
+      uv.push(inci, incj);
+      if (i>0 && j>0){
+        const prev = (i-1)*(segs+1), row = i*(segs+1);
+        idx.push(row+j-1, prev+j-1, prev+j,  row+j-1, prev+j, row+j);
+      }
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  return g;
+}
+
 function godotPrimitiveGeometry(subRes){
   const p = subRes.props;
+  const PI = Math.PI;
+  const lathe = (pts, seg)=> new THREE.LatheGeometry(pts.map(q=>new THREE.Vector2(Math.max(q[0],0), q[1])), seg);
+  const seg = (v, d)=> Math.min(Math.max(Math.round(v ?? d), 3), 256); // Godot allows as few as 3 segments
   switch (subRes.type){
     case 'BoxMesh': {
       const s = p.size || {x:1,y:1,z:1};
       return new THREE.BoxGeometry(s.x, s.y, s.z);
     }
     case 'SphereMesh': {
-      const r = p.radius ?? 0.5;
-      return new THREE.SphereGeometry(r, 24, 16);
+      // Godot: radius + height (height != 2*radius stretches it); optional hemisphere with flat base
+      const r = p.radius ?? 0.5, h = p.height ?? 1.0, rings = Math.max(Math.round(p.rings ?? 32), 2), pts = [];
+      if (p.is_hemisphere){
+        for (let i=0;i<=rings;i++){ const a = (PI/2)*i/rings; pts.push([r*Math.cos(a), h*Math.sin(a)]); }
+      } else {
+        for (let i=0;i<=rings;i++){ const a = -PI/2 + PI*i/rings; pts.push([r*Math.cos(a), (h/2)*Math.sin(a)]); }
+      }
+      return lathe(pts, seg(p.radial_segments, 64));
+    }
+    case 'CapsuleMesh': {
+      // Two hemispherical caps joined by a straight section (total height = p.height)
+      const r = p.radius ?? 0.5, h = p.height ?? 2.0, half = Math.max(h - 2*r, 0)/2, n = Math.max(Math.round(p.rings ?? 8), 1), pts = [];
+      for (let i=0;i<=n;i++){ const a = -PI/2 + (PI/2)*i/n; pts.push([r*Math.cos(a), -half + r*Math.sin(a)]); }
+      for (let i=0;i<=n;i++){ const a = (PI/2)*i/n; pts.push([r*Math.cos(a), half + r*Math.sin(a)]); }
+      return lathe(pts, seg(p.radial_segments, 64));
     }
     case 'CylinderMesh': {
       const rt = p.top_radius ?? 0.5, rb = p.bottom_radius ?? 0.5, h = p.height ?? 2;
-      return new THREE.CylinderGeometry(rt, rb, h, 24);
-    }
-    case 'CapsuleMesh': {
-      // CylinderGeometry is used as an approximation since CapsuleGeometry needs three.js r142+
-      const r = p.radius ?? 0.5, h = p.height ?? 2;
-      return new THREE.CylinderGeometry(r, r, Math.max(h - r*2, 0.001), 20);
+      const open = (p.cap_top === false) || (p.cap_bottom === false);
+      return new THREE.CylinderGeometry(rt, rb, h, seg(p.radial_segments, 64), 1, open);
     }
     case 'PlaneMesh': {
       const s = p.size || {x:2,y:2};
       const g = new THREE.PlaneGeometry(s.x, s.y);
-      g.rotateX(-Math.PI/2);
+      const o = p.orientation ?? 1; // 0 = face X, 1 = face Y (default), 2 = face Z
+      if (o === 1) g.rotateX(-PI/2); else if (o === 0) g.rotateY(PI/2);
       return g;
     }
-    default: return new THREE.BoxGeometry(0.4,0.4,0.4); // fallback placeholder
+    case 'QuadMesh': {
+      const s = p.size || {x:1,y:1};
+      return new THREE.PlaneGeometry(s.x, s.y); // faces +Z like Godot's QuadMesh
+    }
+    case 'PrismMesh': {
+      const s = p.size || {x:1,y:1,z:1};
+      const apexX = -s.x/2 + (p.left_to_right ?? 0.5) * s.x;
+      const shape = new THREE.Shape();
+      shape.moveTo(-s.x/2, -s.y/2); shape.lineTo(s.x/2, -s.y/2); shape.lineTo(apexX, s.y/2); shape.closePath();
+      const g = new THREE.ExtrudeGeometry(shape, { depth: s.z, bevelEnabled: false });
+      g.translate(0, 0, -s.z/2);
+      return g;
+    }
+    case 'TorusMesh': {
+      // Godot gives inner/outer radius; Three.js wants the ring radius + tube radius.
+      const inner = p.inner_radius ?? 0.5, outer = p.outer_radius ?? 1.0;
+      return godotTorusGeometry(inner, outer, seg(p.rings, 64), seg(p.ring_segments, 32)); // (rings around the hole, segments around the tube)
+    }
+    case 'TubeTrailMesh': {
+      const r = p.radius ?? 0.5, len = (p.section_length ?? 0.2) * (p.sections ?? 5);
+      return new THREE.CylinderGeometry(r, r, len, 24); // approximation (trail meshes follow a particle curve)
+    }
+    case 'RibbonTrailMesh': {
+      const len = (p.section_length ?? 0.2) * (p.sections ?? 5), s = p.size ?? 1;
+      const g = new THREE.PlaneGeometry(s, len);
+      return g;
+    }
+    default:
+      godotStatus('Peringatan: tipe mesh bawaan "' + subRes.type + '" belum didukung — diganti kotak placeholder.');
+      return new THREE.BoxGeometry(0.4,0.4,0.4);
   }
 }
 
@@ -1227,8 +1334,8 @@ async function loadTextureFromFile(file, srgb){
   if (!source) return null;
 
   let finalSource = source;
-  if (w > MAX_TEX_DIM || h > MAX_TEX_DIM){
-    const scale = MAX_TEX_DIM / Math.max(w, h);
+  {
+    const scale = Math.min(1, MAX_TEX_DIM / Math.max(w, h));
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(1, Math.round(w*scale));
     canvas.height = Math.max(1, Math.round(h*scale));
@@ -1248,9 +1355,33 @@ async function loadTextureFromFile(file, srgb){
 async function godotMaterialToThree(matRes, ctx, assetMap){
   if (!matRes) return new THREE.MeshStandardMaterial({ color:0x9a9ba3, roughness:0.6, metalness:0.05 });
   try {
+  const fallbackMat = ()=>new THREE.MeshStandardMaterial({ color:0x9a9ba3, roughness:0.6, metalness:0.05 });
+  if (matRes.kind === 'ext'){
+    // Material saved as its own file (.tres / .material): read and parse it from the upload
+    const f = resolveResPath(assetMap, matRes.path);
+    if (!f){ godotStatus('✕ File material eksternal tidak ditemukan: ' + matRes.path); return fallbackMat(); }
+    const sub = parseTscn(await f.text());
+    if (!sub.mainResource){ godotStatus('Peringatan: format material eksternal tidak dikenali: ' + matRes.path); return fallbackMat(); }
+    godotStatus('Material eksternal dimuat: ' + matRes.path.split('/').pop());
+    matRes = sub.mainResource; ctx = sub;
+  }
+  if (matRes.type && !/StandardMaterial3D|ORMMaterial3D|BaseMaterial3D/.test(matRes.type)){
+    godotStatus('Peringatan: tipe material "' + matRes.type + '" belum didukung penuh — hanya properti dasarnya yang dibaca.');
+  }
   const p = matRes.props;
-  const params = { roughness: p.roughness ?? 0.6, metalness: p.metallic ?? 0.0 };
-  if (p.albedo_color) params.color = new THREE.Color(p.albedo_color.r, p.albedo_color.g, p.albedo_color.b);
+  if (!p) return fallbackMat();
+  const params = { roughness: p.roughness ?? 1.0, metalness: p.metallic ?? 0.0 }; // Godot's defaults
+  if (p.albedo_color){
+    // Godot stores colors in sRGB; Three.js lights in linear space
+    params.color = new THREE.Color(p.albedo_color.r, p.albedo_color.g, p.albedo_color.b).convertSRGBToLinear();
+    if (p.albedo_color.a < 1){ params.transparent = true; params.opacity = p.albedo_color.a; }
+  }
+  if (p.transparency && p.transparency > 0) params.transparent = true;
+  if (p.cull_mode === 2) params.side = THREE.DoubleSide; // CULL_DISABLED
+  if (p.emission_enabled && p.emission){
+    params.emissive = new THREE.Color(p.emission.r, p.emission.g, p.emission.b).convertSRGBToLinear();
+    params.emissiveIntensity = p.emission_energy_multiplier ?? 1;
+  }
   const mat = new THREE.MeshStandardMaterial(params);
   const texRef = resolveRef(p.albedo_texture, ctx);
   if (texRef && texRef.path){
@@ -1263,6 +1394,9 @@ async function godotMaterialToThree(matRes, ctx, assetMap){
         new Promise(res=>setTimeout(()=>{ if (!settled) { godotStatus('Peringatan: tekstur terlalu lama dimuat, dilewati: ' + texRef.path); res(null); } }, 8000))
       ]);
       if (tex){
+        tex.wrapS = tex.wrapT = THREE.RepeatWrapping; // Godot repeats textures by default
+        if (p.uv1_scale) tex.repeat.set(p.uv1_scale.x, p.uv1_scale.y);
+        if (p.uv1_offset) tex.offset.set(p.uv1_offset.x, p.uv1_offset.y);
         mat.map = tex; mat.needsUpdate = true;
         godotStatus('✓ Tekstur berhasil dipasang: ' + texRef.path.split('/').pop());
       } else if (settled){
@@ -1283,6 +1417,7 @@ async function godotMaterialToThree(matRes, ctx, assetMap){
 async function loadGodotScene(tscnFile, assetMap){
   const text = await tscnFile.text();
   const ctx = parseTscn(text);
+  const nodeMap = buildNodeIndex(ctx.nodes);
   clearModel();
   const group = new THREE.Group();
   let imported = 0, skipped = 0, pending = [];
@@ -1293,7 +1428,7 @@ async function loadGodotScene(tscnFile, assetMap){
 
       const meshVal = resolveRef(node.props.mesh, ctx);
       let materialOverride = resolveRef(node.props['surface_material_override/0'], ctx);
-      const matrix = node.props.transform ? matrixFromGodotTransform(node.props.transform.transform) : new THREE.Matrix4();
+      const matrix = godotWorldMatrix(node, nodeMap);
 
       if (!meshVal){ skipped++; continue; }
 
@@ -1932,7 +2067,10 @@ function captureScreenshot(){
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   if (transparent){ renderer.setClearAlpha(0); }
+  const gridWasVisible = grid.visible;
+  grid.visible = false; // the grid is a preview aid only — keep it out of the render
   renderer.render(scene, camera);
+  grid.visible = gridWasVisible;
 
   const mime = format==='png' ? 'image/png' : format==='jpeg' ? 'image/jpeg' : 'image/webp';
   const dataUrl = renderer.domElement.toDataURL(mime, 0.95);
